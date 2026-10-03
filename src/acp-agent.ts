@@ -1240,13 +1240,17 @@ const REPLAY_HIDDEN_COMMANDS = new Set([
 // their output as user messages in the session transcript, wrapping the
 // payload in these XML-like markers that the CLI uses for its own display.
 // The live prompt loop drops them; replay must strip them too or they leak
-// into the UI on session/load.
+// into the UI on session/load. A `task-notification` is the CLI telling the
+// model a background task stopped -- live it is never shown either -- and is
+// stripped the same way, keeping any text typed beside it (upstream #1205's
+// replay half).
 const LOCAL_COMMAND_MARKERS = [
   "command-name",
   "command-message",
   "command-args",
   "local-command-stdout",
   "local-command-stderr",
+  "task-notification",
 ].map((tag) => ({ open: `<${tag}>`, close: `</${tag}>` }));
 
 // Single-pass scanner that removes each `<tag>…</tag>` marker (matching the nearest
