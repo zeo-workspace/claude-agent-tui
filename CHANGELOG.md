@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.9](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.8...v0.14.9) (2026-10-04)
+
+
+### Documentation
+
+* fit the npm description within the registry's 255 characters ([ba9c8ec](https://github.com/zeo-workspace/claude-agent-tui/commit/ba9c8ec7c5a0bc8911e8c28f99658152d91d2cf9))
+
 ## [0.14.8](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.7...v0.14.8) (2026-10-04)
 
 
