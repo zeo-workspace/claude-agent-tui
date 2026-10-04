@@ -6,15 +6,6 @@ An [ACP](https://agentclientprotocol.com)-compatible agent that drives the **Cla
 
 > **Fork** of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.57.0, with later upstream changes ported on top. Where the upstream adapter calls the Claude Agent **SDK**, this fork spawns the `claude` **subscription CLI** in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications. See [`.fork-provenance.json`](.fork-provenance.json) for the exact fork point.
 
-## Status
-
-**Maintained for parity, not as an active product.** Development as a product stopped on 2026-06-24, for two reasons the code cannot resolve:
-
-- **Billing.** The premise below — that bridge-driven TUI use counts against your subscription — is a server-side behaviour this project cannot verify. It was closed on the assumption that the billing split takes effect and such use is _not_ covered.
-- **Terms.** Driving the subscription `claude` TUI from an unofficial client may not conform to Anthropic's Terms of Service.
-
-Since 2026-08-28 the adapter is kept in step with upstream `claude-agent-acp` as engineering work, and releases continue. Use it knowing both points above.
-
 ## Why this exists
 
 On **June 15, 2026**, [Anthropic split Claude subscription billing](https://zed.dev/blog/anthropic-subscription-changes) into two pools: Anthropic's **first-party tools** (chat and the official **Claude Code CLI**) keep using your **Pro/Max subscription**, while **third-party agents and SDK usage** are billed separately at **API rates** — roughly **15–30× more expensive** (separate monthly credits: $20 Pro / $100 Max 5x / $200 Max 20x).
