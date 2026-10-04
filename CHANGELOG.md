@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.7](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.6...v0.14.7) (2026-10-04)
+
+
+### Fixed
+
+* **replay:** stop replaying a background task's notification as a prompt ([e276a3f](https://github.com/zeo-workspace/claude-agent-tui/commit/e276a3fd479ddb3f9000b0d9420a067ca60f51d1))
+
 ## [0.14.6](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.5...v0.14.6) (2026-10-03)
 
 
