@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.14.6",
+  "version": "0.14.7",
   "description": "Run the official Claude Code TUI in Zed's agent panel on your Claude Pro/Max subscription — an ACP-over-PTY bridge created for Anthropic's billing split (paused June 15; see README).",
   "main": "dist/lib.js",
   "types": "dist/lib.d.ts",
