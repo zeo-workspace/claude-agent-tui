@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.11](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.10...v0.14.11) (2026-10-04)
+
+
+### Documentation
+
+* drop the parity-status clause from the package description ([77bf7ef](https://github.com/zeo-workspace/claude-agent-tui/commit/77bf7ef674d4b8ace169158279282b6206f77267))
+
 ## [0.14.10](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.9...v0.14.10) (2026-10-04)
 
 
