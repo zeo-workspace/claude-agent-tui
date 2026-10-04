@@ -4,7 +4,16 @@
 
 An [ACP](https://agentclientprotocol.com)-compatible agent that drives the **Claude Code subscription TUI** over a PTY, so your Claude Code threads render natively in [Zed](https://zed.dev) and other ACP clients.
 
-> **Fork** of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.57.0. Where the upstream adapter calls the Claude Agent **SDK**, this fork spawns the `claude` **subscription CLI** in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications. See [`.fork-provenance.json`](.fork-provenance.json) for the exact fork point.
+> **Fork** of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.57.0, with later upstream changes ported on top. Where the upstream adapter calls the Claude Agent **SDK**, this fork spawns the `claude` **subscription CLI** in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications. See [`.fork-provenance.json`](.fork-provenance.json) for the exact fork point.
+
+## Status
+
+**Maintained for parity, not as an active product.** Development as a product stopped on 2026-06-24, for two reasons the code cannot resolve:
+
+- **Billing.** The premise below — that bridge-driven TUI use counts against your subscription — is a server-side behaviour this project cannot verify. It was closed on the assumption that the billing split takes effect and such use is _not_ covered.
+- **Terms.** Driving the subscription `claude` TUI from an unofficial client may not conform to Anthropic's Terms of Service.
+
+Since 2026-08-28 the adapter is kept in step with upstream `claude-agent-acp` as engineering work, and releases continue. Use it knowing both points above.
 
 ## Why this exists
 
@@ -33,7 +42,11 @@ This project bridges the two: it drives the **official Claude Code TUI** over a 
 
 ## Register in Zed
 
-Build the agent, then point Zed's `agent_servers` at the built entrypoint:
+Install the agent, then point Zed's `agent_servers` at it:
+
+```sh
+npm install -g @lucascouts/claude-agent-tui
+```
 
 ```jsonc
 // ~/.config/zed/settings.json
@@ -41,13 +54,15 @@ Build the agent, then point Zed's `agent_servers` at the built entrypoint:
   "agent_servers": {
     "Claude Agent TUI": {
       "type": "custom",
-      "command": "node",
-      "args": ["/absolute/path/to/claude-agent-tui/dist/index.js"],
+      "command": "claude-agent-tui",
+      "args": [],
       "env": {},
     },
   },
 }
 ```
+
+From a source checkout instead, build it and use `"command": "node"` with `"args": ["/absolute/path/to/claude-agent-tui/dist/index.js"]`.
 
 Open the Agent Panel in Zed and select **Claude Agent TUI**.
 

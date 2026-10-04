@@ -4,7 +4,7 @@
     "access": "public"
   },
   "version": "0.14.7",
-  "description": "Run the official Claude Code TUI in Zed's agent panel on your Claude Pro/Max subscription — an ACP-over-PTY bridge created for Anthropic's billing split (paused June 15; see README).",
+  "description": "Runs the official Claude Code TUI over a PTY and exposes it via ACP, so Claude Code threads render natively in Zed's agent panel. Built for Anthropic's June 2026 billing split (since paused); maintained for upstream parity, not as an active product — see README.",
   "main": "dist/lib.js",
   "types": "dist/lib.d.ts",
   "bin": {
@@ -43,6 +43,7 @@
     "claude",
     "claude-code",
     "acp",
+    "agent-client-protocol",
     "agent",
     "anthropic",
     "zed",
