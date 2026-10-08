@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.14.11",
+  "version": "0.14.12",
   "description": "Runs the official Claude Code TUI over a PTY and exposes it via ACP, so Claude Code threads render natively in Zed's agent panel. Built for Anthropic's June 2026 billing split (since paused).",
   "main": "dist/lib.js",
   "types": "dist/lib.d.ts",
