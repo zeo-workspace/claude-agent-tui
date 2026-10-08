@@ -21,12 +21,22 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      # Uses the default GITHUB_TOKEN (no GitHub App needed); the publish job runs
-      # in the SAME workflow run via `needs`, so it is not blocked by the
-      # "token-created events don't trigger workflows" rule.
+      # A GitHub App token, not GITHUB_TOKEN: GitHub holds every workflow run on a
+      # PR opened by github-actions[bot] in action_required until a maintainer
+      # approves it, so release PRs merged with no CI at all. A PR authored by an
+      # App with write access runs its checks without that approval.
+      - name: Generate GitHub App token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      # The publish job runs in the SAME workflow run via `needs`, so it never
+      # depended on which token opened the PR.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
+          token: ${{ steps.app-token.outputs.token }}
           # NO release-type here. In v5's loadOrBuildManifest(), a non-empty
           # release-type takes the Manifest.fromConfig() branch, which builds the
           # config in memory and NEVER opens config-file — silently discarding
