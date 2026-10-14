@@ -1,4 +1,4 @@
-import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
+import type { ModelInfo, Options, Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MODEL_CATALOG } from "./model-catalog.js";
 import { filterSupersededModels } from "./model-recency.js";
 import { resolveClaudePath } from "./claude-path.js";
@@ -135,32 +135,90 @@ function defaultSource(): Promise<ModelInfo[]> {
 }
 
 /**
- * The production source: spawn the PATH `claude` through the SDK purely to read
- * its model list, then shut it down. `supportedModels()` is a control request,
- * not a turn — it sends no prompt and consumes no quota.
+ * A prompt stream that never yields a message and ends only when `signal` aborts.
+ *
+ * This is what keeps the catalogue read INERT. `query({ prompt: "" })` does not
+ * mean "no prompt": the SDK submits the empty string as a real user turn, the
+ * model answers it, and that answer is billed. Measured 2026-10-14: the session
+ * transcript held a user record with a `promptId`, and 51 Opus responses were
+ * billed across one day's test runs. With streaming input and no message, the
+ * CLI starts, answers control requests such as `supportedModels()`, and never
+ * has a turn to run.
  */
-async function liveSource(): Promise<ModelInfo[]> {
-  assertLiveCatalogAllowed();
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const q = query({
-    prompt: "",
-    options: {
-      pathToClaudeCodeExecutable: resolveClaudePath(),
-      // Read the user's own settings, so the catalogue matches what their CLI
-      // would offer; the fetch is otherwise inert.
-      settingSources: ["user"],
-    },
+export function silentPrompt(signal: AbortSignal): AsyncIterable<SDKUserMessage> {
+  const ended = new Promise<IteratorResult<SDKUserMessage>>((resolve) => {
+    const end = () => resolve({ value: undefined, done: true });
+    if (signal.aborted) end();
+    else signal.addEventListener("abort", end, { once: true });
+  });
+  // Every `next()` waits for the abort and then reports the end: no message is ever produced.
+  return { [Symbol.asyncIterator]: () => ({ next: () => ended }) };
+}
+
+/**
+ * The SDK options of the catalogue read, and why each one is there.
+ *
+ * - `settingSources: ["user"]` — the user's own settings still shape the list
+ *   (`availableModels`, `env`, a model override), so the picker matches what
+ *   their CLI would offer.
+ * - `settings: { disableAllHooks: true }` — the inline settings are the flag
+ *   layer, which outranks the user file, so the user's hooks (SessionStart,
+ *   SessionEnd, statusLine…) do not run for a read that is not a session.
+ *   Without it, every catalogue read fired them like a real session.
+ * - `strictMcpConfig` with no `mcpServers` — no MCP server is started.
+ * - `persistSession: false` — nothing is written under `~/.claude/projects/`.
+ */
+export function catalogQueryOptions(pathToClaudeCodeExecutable: string): Options {
+  return {
+    pathToClaudeCodeExecutable,
+    settingSources: ["user"],
+    settings: { disableAllHooks: true },
+    strictMcpConfig: true,
+    mcpServers: {},
+    persistSession: false,
+  };
+}
+
+/** The slice of the SDK's `query` the catalogue read uses; injectable so tests need no spawn. */
+export type CatalogQueryFn = (params: {
+  prompt: AsyncIterable<SDKUserMessage>;
+  options: Options;
+}) => Pick<Query, "supportedModels" | "close">;
+
+/**
+ * Read the model list from a CLI started with {@link catalogQueryOptions} and
+ * {@link silentPrompt}, then close it. `supportedModels()` is a control request,
+ * not a turn: with no message on the prompt stream, no model call is made and
+ * no quota is used.
+ */
+export async function readSupportedModels(
+  queryFn: CatalogQueryFn,
+  pathToClaudeCodeExecutable: string,
+): Promise<ModelInfo[]> {
+  const stop = new AbortController();
+  const q = queryFn({
+    prompt: silentPrompt(stop.signal),
+    options: catalogQueryOptions(pathToClaudeCodeExecutable),
   });
   try {
     return await q.supportedModels();
   } finally {
     // Never let a failed teardown mask a successful read.
     try {
-      q.return(undefined);
+      q.close();
     } catch {
       /* the process is going away regardless */
     }
+    // Release the prompt stream, so nothing waits on it after the CLI is gone.
+    stop.abort();
   }
+}
+
+/** The production source: the PATH `claude`, read inertly. See {@link readSupportedModels}. */
+async function liveSource(): Promise<ModelInfo[]> {
+  assertLiveCatalogAllowed();
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  return readSupportedModels(query, resolveClaudePath());
 }
 
 /** Reject after {@link CATALOG_TIMEOUT_MS} so a hung control request cannot stall session creation. */
