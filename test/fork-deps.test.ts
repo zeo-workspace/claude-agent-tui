@@ -16,13 +16,13 @@ const deps = (pkg.dependencies ?? {}) as Record<string, string>;
 
 // --- Task 2.1: kept ACP + reused-SDK deps pinned exactly (no caret/tilde) ---
 
-test("fork deps: @agentclientprotocol/sdk pinned exactly to 1.5.1, no range (R2.1)", () => {
-  assert.equal(deps["@agentclientprotocol/sdk"], "1.5.1");
+test("fork deps: @agentclientprotocol/sdk pinned exactly to 1.8.0, no range (R2.1)", () => {
+  assert.equal(deps["@agentclientprotocol/sdk"], "1.8.0");
   assert.doesNotMatch(deps["@agentclientprotocol/sdk"] ?? "", /[\^~]/);
 });
 
-test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.261, no range (R2.2)", () => {
-  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.261");
+test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.296, no range (R2.2)", () => {
+  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.296");
   assert.doesNotMatch(deps["@anthropic-ai/claude-agent-sdk"] ?? "", /[\^~]/);
 });
 
@@ -46,4 +46,17 @@ test("fork deps: node-pty is the ONLY dependency key added vs upstream v0.53.0 (
   const removed = [...upstream].filter((k) => !current.has(k)).sort();
   assert.deepEqual(added, ["node-pty"], "exactly one dependency key added: node-pty");
   assert.deepEqual(removed, [], "no upstream dependency key removed");
+});
+
+// --- 2026-10-15: the SDK pins carry the upstream commit they were taken from ---
+
+test("fork deps: the SDK pins equal provenance.dependencyPinAnchor (upstream d6f60f51)", () => {
+  const anchor = readJson(".fork-provenance.json").dependencyPinAnchor as
+    | { sha?: string; pins?: Record<string, string> }
+    | undefined;
+  assert.ok(anchor?.pins, "provenance must record where the SDK pins came from");
+  assert.match(anchor.sha ?? "", /^[0-9a-f]{40}$/, "the anchor is a full upstream commit sha");
+  for (const [name, version] of Object.entries(anchor.pins)) {
+    assert.equal(deps[name], version, `${name} must equal the anchored upstream pin`);
+  }
 });
