@@ -61,6 +61,7 @@ import {
 } from "@anthropic-ai/sdk/resources/beta.mjs";
 import path from "node:path";
 import { Logger } from "./acp-agent.js";
+import type { BackgroundTaskEnd } from "./background-task-end.js";
 
 /**
  * Union of all possible content types that can appear in tool results from the Anthropic SDK.
@@ -107,10 +108,33 @@ interface ToolUpdate {
     };
     terminal_exit?: {
       terminal_id: string;
-      exit_code: number;
+      exit_code: number | null;
       signal: string | null;
     };
   };
+}
+
+/**
+ * Item 92 (upstream #1312) — how a backgrounded Bash's terminal exit is reported at its tool result.
+ * The result only announces the command; the command's end arrives later as a task notification.
+ */
+export type BackgroundExitPolicy = {
+  /** The task's end, when the transcript already holds its notification (keyed by tool_use id). */
+  ended: (toolUseId: string) => BackgroundTaskEnd | undefined;
+  /**
+   * Leave the exit out while the task runs. Only the live pump sets this, because only it sends the
+   * exit later ({@link ClaudeAcpAgent} `flushBackgroundExits`); every other caller exits at the result.
+   */
+  holdRunning: boolean;
+};
+
+/**
+ * Upstream #1252: the exit code Claude Code's text of a failed command names. It starts that text with
+ * `Exit code N`; a failure that names none (a denial, a command that could not start) yields undefined.
+ */
+function failureExitCode(text: string): number | undefined {
+  const match = text.match(/^Exit code (\d+)(?:\n|$)/);
+  return match ? Number(match[1]) : undefined;
 }
 
 /**
@@ -650,6 +674,9 @@ export function toolUpdateFromToolResult(
   // `getSessionMessages` doesn't expose this field — the fork reads the transcript directly, so the
   // structured path is available on BOTH the live tail and `session/load`.
   toolUseResult?: unknown,
+  // Item 92 (#1312): how a backgrounded Bash's exit is reported. Absent → exit at the result, with
+  // null as the (unknown) code.
+  background?: BackgroundExitPolicy,
 ): ToolUpdate {
   if (
     "is_error" in toolResult &&
@@ -775,7 +802,9 @@ export function toolUpdateFromToolResult(
       // 3. Plain string content from a regular tool_result
       // 4. Array content (e.g. [{ type: "text", text: "..." }])
       let output = "";
-      let exitCode = isError ? 1 : 0;
+      // `null` is an exit whose code nobody knows (a replayed backgrounded command); Zeo reads it as
+      // "not failed", so a failure always carries a number — the one its text names, else 1.
+      let exitCode: number | null = isError ? 1 : 0;
 
       const structuredBash = structuredResult<BashOutput>(toolUseResult);
       if (
@@ -828,6 +857,26 @@ export function toolUpdateFromToolResult(
         output = result.map((c: unknown) => (c as { text: string }).text).join("\n");
       }
 
+      // Upstream #1252: a failed command's text starts with `Exit code N` when the command itself
+      // exited non-zero. Report N instead of the conventional 1; a failure naming no code keeps 1.
+      if (isError) {
+        const named = failureExitCode(output);
+        if (named !== undefined && named !== 0) exitCode = named;
+      }
+
+      // Upstream #1312: a backgrounded command is still running when its result arrives — the result
+      // only announces it. Its exit comes from the task's notification: at the result when the
+      // transcript already holds it, otherwise from the live pump once it lands (`holdRunning`), or —
+      // for callers that cannot send it later (replay, nested rows) — at the result with no code.
+      const backgroundTaskId = structuredBash?.backgroundTaskId;
+      let holdExit = false;
+      if (backgroundTaskId !== undefined && !isError) {
+        const end = terminalId !== undefined ? background?.ended(terminalId) : undefined;
+        if (end) exitCode = end.exitCode;
+        else if (background?.holdRunning) holdExit = true;
+        else exitCode = null;
+      }
+
       // Without a terminal id there is nothing the client can reconcile these metas against, and
       // emitting them anyway strands the output: a client that buffers output/exit for terminals it
       // has not been told about (Zed keeps them in `pending_terminal_output`/`pending_terminal_exit`,
@@ -844,11 +893,15 @@ export function toolUpdateFromToolResult(
               terminal_id: terminalId,
               data: output,
             },
-            terminal_exit: {
-              terminal_id: terminalId,
-              exit_code: exitCode,
-              signal: null,
-            },
+            ...(holdExit
+              ? {}
+              : {
+                  terminal_exit: {
+                    terminal_id: terminalId,
+                    exit_code: exitCode,
+                    signal: null,
+                  },
+                }),
           },
         };
       }
