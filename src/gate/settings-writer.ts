@@ -460,28 +460,27 @@ export async function restore(backup: Backup): Promise<RestoreResult> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Story 060 (R2.2 / R2.3 / R3.2) — toggle the ultracode keys in the per-session SCRATCH settings file.
+// Item 84 — mirror the Ultracode switch into the per-session SCRATCH settings file.
 //
-// The "ultracode" effort-selector sentinel (story 060) activates the binary's Workflow keyword-trigger.
-// Its LIVE activation is a keyword prefix on the outgoing prompt (acp-agent.ts); THIS function is the
-// declarative spawn-time complement — the keys `claude` reads only at (re-)spawn, so the scratch stays
-// in sync for any (re-)spawn that DOES happen. It is NOT itself a re-spawn trigger (Option A).
+// The switch is applied live with `/effort ultracode on|off`, which the CLI keeps for "this session
+// only" — a re-spawn of the PTY (mode/agent change, resume) starts a new CLI process without it. The
+// scratch file is that process's `--settings`, so `ultracode:true` here carries the switch across a
+// re-spawn. It is NOT a re-spawn trigger. Story 060 also wrote `ultracodeKeywordTrigger:true`; that is
+// not a settings key: CLI 2.1.261, 2.1.285, 2.1.296 (parity audit, round 21) and 2.1.299 use it only
+// as a telemetry label — the real key is `workflowKeywordTriggerEnabled` — so it was dropped.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The two settings keys that opt a session into the ultracode keyword-trigger (story 060). */
+/** The settings key that keeps Ultracode on for a (re-)spawned session. */
 const ULTRACODE_SETTINGS_KEY = "ultracode";
-const ULTRACODE_KEYWORD_TRIGGER_KEY = "ultracodeKeywordTrigger";
 
 /**
- * Story 060 (R2.2/R2.3/R3.2) — toggle the ultracode keys in the per-session SCRATCH settings file the
- * gate wrote (preserving the hook + EVERY other key). `active` → set `ultracode:true` (the per-session
- * ACTIVATOR) + `ultracodeKeywordTrigger:true` (defensively ENABLE the keyword even if the user disabled
- * it). `!active` → remove BOTH keys. Read tolerantly (JSONC) + written durably (temp+fsync+rename),
- * mirroring {@link injectHook}. A missing/empty file is treated as an empty object. No-op-safe and
- * idempotent: re-applying the same `active` produces a byte-equivalent document.
+ * Item 84 — set (`active`) or remove the `ultracode` key in the per-session SCRATCH settings file the
+ * gate wrote, preserving the hook and EVERY other key. Read tolerantly (JSONC) and written durably
+ * (temp+fsync+rename), mirroring {@link injectHook}. A missing/empty file is treated as an empty
+ * object. Idempotent: re-applying the same `active` produces a byte-equivalent document.
  *
  * @param settingsPath absolute path to the per-session scratch `settings.local.json` (the gate's file).
- * @param active whether ultracode is selected (set the keys) or de-selected (remove them).
+ * @param active whether Ultracode is on (set the key) or off (remove it).
  * @throws {Error} only on a genuine read/parse/write failure — NEVER on the benign absence of the file
  *   (ENOENT → treated as `{}`), mirroring the rest of the module's discipline.
  */
@@ -497,15 +496,13 @@ export async function applyUltracodeSettings(settingsPath: string, active: boole
     }
   }
 
-  // 2) Clone (never mutate the parsed prior) and toggle ONLY the two ultracode keys — every other key
+  // 2) Clone (never mutate the parsed prior) and toggle ONLY the ultracode key — every other key
   //    (the gate hook, the user's own config) is preserved verbatim.
   const next = structuredClone(current) as SettingsLike;
   if (active) {
     next[ULTRACODE_SETTINGS_KEY] = true;
-    next[ULTRACODE_KEYWORD_TRIGGER_KEY] = true;
   } else {
     delete next[ULTRACODE_SETTINGS_KEY];
-    delete next[ULTRACODE_KEYWORD_TRIGGER_KEY];
   }
 
   // 3) Durably write (temp+fsync+rename) so a concurrent (re-)spawn read never sees a half-written file.
