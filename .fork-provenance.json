@@ -12,6 +12,17 @@
     "forkProvenanceTag": "The upstream tag currently vendored into src/ - the single live anchor for the fork point, re-anchored by sync stories (009 -> v0.39.0, 070 -> v0.53.0, 074 -> v0.57.0). It is independent of packageJsonVersion in both trees."
   },
   "upstreamDependencyKeys": ["@agentclientprotocol/sdk", "@anthropic-ai/claude-agent-sdk", "zod"],
+  "dependencyPinAnchor": {
+    "note": "The upstream commit whose package.json the two SDK pins were taken from. It anchors DEPENDENCY VERSIONS only and is independent of tag/sha above, which anchor the code vendored into src/ and move only with a sync story. Machine-checked by test/fork-deps.test.ts. zod is not pinned to upstream here (upstream pins exact 4.6.7; this tree keeps ^4.0.0).",
+    "sha": "d6f60f512aee90b3449c03d0ede201ceba438d01",
+    "pr": "#1330",
+    "firstReleasedIn": "v0.90.0",
+    "takenOn": "2026-10-15",
+    "pins": {
+      "@agentclientprotocol/sdk": "1.8.0",
+      "@anthropic-ai/claude-agent-sdk": "0.3.296"
+    }
+  },
   "externalRuntimeDeps": [
     {
       "name": "claude",
