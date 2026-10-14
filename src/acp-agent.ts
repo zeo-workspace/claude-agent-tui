@@ -139,7 +139,7 @@ import {
   ULTRACODE_EFFORT_LEVEL,
   ULTRACODE_EFFORT_LABEL,
 } from "./model-catalog.js";
-import { resolveModelCatalog } from "./live-model-catalog.js";
+import { resolveModelCatalog, type SupportedModelsSource } from "./live-model-catalog.js";
 // Story 060 (R2.2/R2.3/R3.2) — the declarative spawn-time complement to the live ultracode keyword:
 // toggle the {ultracode,ultracodeKeywordTrigger} keys in the gate's per-session scratch settings file
 // (preserving the hook + every other key). Lives in the gate's settings-writer so it reuses durableWrite.
@@ -774,6 +774,12 @@ export interface AgentDeps {
    * `true`/`false` to exercise the toggle's advertise/apply/reconcile paths hermetically.
    */
   fastModeProbe?: FastModeProbe;
+  /**
+   * Item 93 — override where `createSession` reads the model picker from (default: the PATH `claude`'s
+   * `supportedModels()`, see live-model-catalog.ts). Tests inject a fixed catalogue so they assert this
+   * adapter's behaviour, not whatever the host CLI serves that day.
+   */
+  modelCatalogSource?: SupportedModelsSource;
 }
 
 /**
@@ -1597,6 +1603,8 @@ export class ClaudeAcpAgent implements Agent {
   ) => Promise<{ summary: string; lastModified?: number } | undefined>;
   /** Story 073 (R1) — fast-mode availability probe seam; see {@link AgentDeps.fastModeProbe}. */
   private readonly fastModeProbe: FastModeProbe;
+  /** Item 93 — model-picker source seam; see {@link AgentDeps.modelCatalogSource}. */
+  private readonly modelCatalogSource: SupportedModelsSource | undefined;
   /** Live PTY-engine registry shared with the per-session engines (story 014 cleanup map). */
   private readonly engines: Map<string, SessionEngine> = new Map();
 
@@ -1613,6 +1621,7 @@ export class ClaudeAcpAgent implements Agent {
     this.engine = engine;
     this.startEngine = deps.startEngine ?? defaultStartEngine;
     this.fastModeProbe = deps.fastModeProbe ?? defaultFastModeProbe;
+    this.modelCatalogSource = deps.modelCatalogSource;
     // Story 043 (R2.1): when liveDiff is ON, the live JSONL reader is the diff-enriched reader
     // (getSessionMessages + uuid→toolUseResult hydration), which restores the story-021 Edit/Write
     // diff on BOTH the live pump and the session/load replay (both read this.getMessages once). The
@@ -3807,7 +3816,7 @@ export class ClaudeAcpAgent implements Agent {
     // written down goes stale silently. Falls back to the static MODEL_CATALOG on
     // any failure — see live-model-catalog.ts. `default` is present in both, which
     // is why the seed below can stay a constant.
-    const liveModelCatalog = await resolveModelCatalog(this.logger);
+    const liveModelCatalog = await resolveModelCatalog(this.logger, this.modelCatalogSource);
     const availableModes = buildAvailableModes(DEFAULT_MODEL_INFO, allowBypass);
     const modes: SessionModeState = {
       currentModeId: seededMode,
@@ -4825,7 +4834,7 @@ export function inferContextWindowFromModel(model: string): number | null {
  *  field), used by the pump to refine the alias seed once the model is known. Exact-ID lookup first
  *  (MODEL_ID_CONTEXT_WINDOWS), then a family+version heuristic for dated snapshots / future variants
  *  (Opus is NOT uniform: 4.6 and earlier = 200K, 4.7+ = 1M; Sonnet 4.x = 200K but Sonnet 5+ = 1M;
- *  haiku = 200K; fable = 1M — story 071), then a
+ *  Haiku 4.x = 200K but Haiku 5+ = 1M — item 93; fable = 1M — story 071), then a
  *  `\b1m\b` suffix, then null (R1.3: a missing / non-string id never refines). */
 export function inferContextWindowFromModelId(id: string): number | null {
   if (typeof id !== "string" || id.length === 0) return null;
@@ -4846,6 +4855,9 @@ export function inferContextWindowFromModelId(id: string): number | null {
   // like the Opus 4-6 vs 4-7/4-8 split above; dated snapshots (`claude-sonnet-5-<date>`) match too.
   const sonnet = id.match(/claude-sonnet-(\d+)/);
   if (sonnet) return Number(sonnet[1]) >= 5 ? 1_000_000 : 200_000;
-  if (/claude-haiku/.test(id)) return 200_000;
+  // Haiku split the same way (item 93): Haiku 4.x is 200K, Haiku 5.5 is native 1M (the CLI's baked-in
+  // catalogue: `context:{window:1e6,native_1m:!0}`). A blanket 200K under-sized every Haiku 5.5 turn.
+  const haiku = id.match(/claude-haiku-(\d+)/);
+  if (haiku) return Number(haiku[1]) >= 5 ? 1_000_000 : 200_000;
   return null;
 }

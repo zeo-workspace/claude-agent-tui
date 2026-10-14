@@ -19,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ClaudeAcpAgent } from "../dist/acp-agent.js";
 import { DEFAULT_MODEL_INFO, MODEL_CATALOG } from "../dist/model-catalog.js";
+import { stubModelCatalogSource } from "./helpers/stub-model-catalog.ts";
 
 const PARITY_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
@@ -61,12 +62,20 @@ test("catalog order + membership: default, fable, opus, sonnet, haiku", () => {
   );
 });
 
-test("supportsAutoMode set on default/fable/opus/sonnet, NOT haiku", () => {
+test("supportsAutoMode set on every fallback row, haiku included (Haiku 5.5 supports auto)", () => {
+  // Item 93: CLI 2.1.299's live `supportedModels()` marks the `haiku` row (Haiku 5.5) with
+  // `supportsAutoMode: true`; the Haiku 4.5 row that lacked it is no longer what `haiku` resolves to.
   const auto = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!.supportsAutoMode === true;
-  for (const v of ["default", "fable", "opus", "sonnet"]) {
+  for (const v of ["default", "fable", "opus", "sonnet", "haiku"]) {
     assert.ok(auto(v), `${v} must declare supportsAutoMode (surfaces the auto permission mode)`);
   }
-  assert.ok(!auto("haiku"), "haiku must NOT declare supportsAutoMode (auto dropped — parity with the original)");
+});
+
+test("item 93: the haiku fallback row is Haiku 5.5 with the full effort set", () => {
+  const haiku = MODEL_CATALOG.find((m) => m.value === "haiku")!;
+  assert.equal(haiku.displayName, "Haiku 5.5");
+  assert.equal(haiku.supportsEffort, true);
+  assert.deepEqual(haiku.supportedEffortLevels, PARITY_LEVELS);
 });
 
 // ---- the surface via the agent (effort-surface / effort-apply precedents) -------------------------
@@ -111,6 +120,8 @@ async function newSession(
 ) {
   const agent = new ClaudeAcpAgent(makeClient(), undefined, undefined, {
     startEngine: startEngine as never,
+    // Hermetic: never read the host CLI's picker (item 93) — its `haiku` is effort-capable now.
+    modelCatalogSource: stubModelCatalogSource,
   });
   t.after(() => agent.dispose());
   const response = await (

@@ -77,12 +77,14 @@ export const ULTRACODE_EFFORT_LABEL = "ultracode (xhigh + orchestration)";
  * A tier alias always points at the newest member of its family, so these rows do NOT age out on a
  * model launch — only the version text in the row does. Verified 2026-09-23:
  * `opus` → `claude-opus-5-5`, `fable` → `claude-fable-5-1`, `sonnet` → `claude-sonnet-5`,
- * `haiku` → `claude-haiku-4-5-20251001`.
+ * `haiku` → `claude-haiku-4-5-20251001`. Re-read 2026-10-14 from CLI 2.1.299's live
+ * `supportedModels()`: `sonnet` → `claude-sonnet-5-5`, `haiku` → `claude-haiku-5-5` (both moved in
+ * CLI 2.1.293).
  *
- * Effort-capable models (`default`/`fable`/`opus`/`sonnet`) carry `supportsEffort` +
- * `supportedEffortLevels`; `haiku` advertises none. `supportsAutoMode: true` on the same four surfaces
- * the `auto` permission mode (a model classifier) — the original drops `auto` on `haiku` (the SDK signal
- * `reconcileModeFromTranscript` clamps), so haiku omits it.
+ * Every row is effort-capable (`supportsEffort` + `supportedEffortLevels`) and carries
+ * `supportsAutoMode: true`, which surfaces the `auto` permission mode (a model classifier). `haiku`
+ * used to advertise neither: Haiku 4.5 had no effort levels and the original drops `auto` on it.
+ * Haiku 5.5 has both, per the live CLI rows.
  */
 export const MODEL_CATALOG: ModelInfo[] = [
   {
@@ -120,23 +122,32 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     value: "sonnet",
-    displayName: "Sonnet 5",
-    description: "Sonnet 5 with 1M context · Efficient for routine tasks",
+    // Item 93: `sonnet` resolves to `claude-sonnet-5-5` since CLI 2.1.293 (the baked-in catalogue's
+    // `aliases.sonnet.default`); the tagline is the live row's, verbatim (CLI 2.1.299).
+    displayName: "Sonnet 5.5",
+    description: "Sonnet 5.5 with 1M context · Most efficient for simpler tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
   },
   {
     value: "haiku",
-    displayName: "Haiku 4.5",
-    description: "Haiku 4.5 · Fastest for quick answers",
+    // Item 93: `haiku` resolves to `claude-haiku-5-5` since CLI 2.1.293 — native 1M context, 128k
+    // output, and the full effort set (`capabilities: ["effort","max_effort","xhigh_effort",…]` in the
+    // baked-in catalogue). The live `supportedModels()` row (CLI 2.1.299) carries `supportsEffort`,
+    // all five levels and `supportsAutoMode`, so the fallback row does too.
+    displayName: "Haiku 5.5",
+    description: "Haiku 5.5 with 1M context · Fastest for quick answers",
+    supportsEffort: true,
+    supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
   },
 ];
 
 /**
  * Story 068 (R1, R1.1, R2) — the REAL per-alias context window, keyed by the EXACT {@link MODEL_CATALOG}
- * `value`. These windows are NOT uniform: `default`/`fable`/`opus`/`sonnet` are natively 1M and `haiku`
- * is 200K. This map is the single source of truth that `inferContextWindowFromModel` (acp-agent.ts)
+ * `value`. Every alias is natively 1M today; `haiku` was 200K until it moved to Haiku 5.5 (item 93).
+ * Older generations are NOT uniform, which is why {@link MODEL_ID_CONTEXT_WINDOWS} refines per turn. This map is the single source of truth that `inferContextWindowFromModel` (acp-agent.ts)
  * consults BEFORE the `\b1m\b` regex fallback — the bug it fixes is `opus` having wrongly reported 200K
  * (the regex only ever matched the literal `1m` token).
  *
@@ -152,7 +163,8 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   fable: 1_000_000,
   opus: 1_000_000,
   sonnet: 1_000_000,
-  haiku: 200_000,
+  // Item 93: Haiku 5.5 is native 1M. Seeding 200K made every Haiku turn report 5x the real usage.
+  haiku: 1_000_000,
 };
 
 /**
@@ -174,10 +186,12 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-opus-4-6": 200_000,
   "claude-fable-5-1": 1_000_000,
   "claude-fable-5": 1_000_000,
+  "claude-sonnet-5-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-sonnet-4-6": 200_000,
   "claude-sonnet-4-5-20250929": 200_000,
   "claude-sonnet-4-20250514": 200_000,
+  "claude-haiku-5-5": 1_000_000,
   "claude-haiku-4-5": 200_000,
 };
 

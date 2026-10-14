@@ -58,11 +58,13 @@ test("2.1 catalog: at least one entry declares effort support — unlocks the ef
   }
 });
 
-test("2.1 catalog: a non-effort model does NOT advertise effort levels (effort stays hidden for it)", () => {
-  // `haiku` is the genuine non-effort model — it must not claim effort support, else the effort
-  // selector would appear for a model that can't honor it. (Story 056: `default` NOW
-  // advertises effort for v0.52 parity — pinned by model-catalog-effort.test.ts.)
+test("2.1 catalog: `haiku` advertises effort — it resolves to Haiku 5.5 (item 93)", () => {
+  // `haiku` used to be the genuine non-effort model (Haiku 4.5). CLI 2.1.293 made Haiku 5.5 the
+  // default Haiku, and the live picker (CLI 2.1.299) serves it with the full effort set. A fallback
+  // row that still hid effort would make the picker disagree with the CLI it stands in for. The
+  // "non-effort model hides the effort option" contract now lives in the agent-level suites, on a
+  // stub catalogue (test/helpers/stub-model-catalog.ts).
   const haiku = MODEL_CATALOG.find((m) => m.value === "haiku");
   assert.ok(haiku, "haiku entry present");
-  assert.notEqual(haiku!.supportsEffort, true, "a genuine non-effort model (`haiku`) must not declare effort support");
+  assert.equal(haiku!.supportsEffort, true, "`haiku` (Haiku 5.5) declares effort support");
 });

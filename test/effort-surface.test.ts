@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ClaudeAcpAgent } from "../dist/acp-agent.js";
-import { MODEL_CATALOG } from "../dist/model-catalog.js";
+import { stubModelCatalogSource, STUB_MODEL_CATALOG } from "./helpers/stub-model-catalog.ts";
 
 function makeAgent() {
   const client = {
@@ -35,7 +35,11 @@ function makeAgent() {
     watcher: { stop() {}, notifyEndOfTurn() {} },
     cwd: args.cwd,
   });
-  return new ClaudeAcpAgent(client, undefined, undefined, { startEngine: startEngine as never });
+  return new ClaudeAcpAgent(client, undefined, undefined, {
+    startEngine: startEngine as never,
+    // Hermetic: never read the host CLI's picker (item 93).
+    modelCatalogSource: stubModelCatalogSource,
+  });
 }
 
 const configOptions = (agent: ClaudeAcpAgent, sessionId: string) =>
@@ -56,7 +60,7 @@ const setOption = (agent: ClaudeAcpAgent, sessionId: string, configId: string, v
   }).setSessionConfigOption({ sessionId, configId, value });
 
 test("3.1 selecting an effort-capable catalog model surfaces the `effort` configOption (R2.1)", async (t) => {
-  const effortModel = MODEL_CATALOG.find((m) => m.supportsEffort === true);
+  const effortModel = STUB_MODEL_CATALOG.find((m) => m.supportsEffort === true);
   assert.ok(effortModel, "the catalog must declare at least one effort-capable model (Task 2.1 dependency)");
 
   const agent = makeAgent();
@@ -78,9 +82,9 @@ test("3.1 selecting an effort-capable catalog model surfaces the `effort` config
 });
 
 test("3.1 selecting a NON-effort model leaves the `effort` configOption absent (R2.1 — hidden)", async (t) => {
-  // Story 056: `default` now advertises effort (v0.52 parity), so the genuine non-effort model is
-  // `haiku` (fallback: any model that does not declare effort).
-  const nonEffort = MODEL_CATALOG.find((m) => m.value === "haiku") ?? MODEL_CATALOG.find((m) => m.supportsEffort !== true);
+  // Story 056: `default` now advertises effort (v0.52 parity). Item 93: the host CLI's `haiku` is
+  // Haiku 5.5, effort-capable since CLI 2.1.293, so the non-effort row comes from the stub catalogue.
+  const nonEffort = STUB_MODEL_CATALOG.find((m) => m.value === "haiku") ?? STUB_MODEL_CATALOG.find((m) => m.supportsEffort !== true);
   assert.ok(nonEffort, "the catalog must include a non-effort model (e.g. `haiku`)");
 
   const agent = makeAgent();
