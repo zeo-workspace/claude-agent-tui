@@ -116,5 +116,5 @@ jobs:
           # without this line the thing that actually scans is a mutable tag reaching CI
           # without passing through any PR. Keep it equal to the version in the comment
           # above; trufflehog-pin.test.ts fails when the two diverge.
-          version: "3.97.5"
+          version: "3.99.0"
           extra_args: --results=verified,unknown
