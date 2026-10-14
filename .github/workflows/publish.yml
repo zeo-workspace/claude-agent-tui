@@ -112,7 +112,7 @@ jobs:
         # SPDX-JSON SBOM of the exact directory that became the tarball (dist +
         # production node_modules incl. native node-pty). Attached, not uploaded
         # as a workflow artifact — release asset upload is done explicitly below.
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: ${{ steps.bundle.outputs.pkg }}
           format: spdx-json
