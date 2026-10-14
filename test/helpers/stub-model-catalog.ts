@@ -55,7 +55,9 @@ export const STUB_MODEL_CATALOG: ModelInfo[] = [
   {
     // The non-effort row. See the header for why it is called `haiku`.
     value: "haiku",
-    displayName: "Stub Haiku (no effort)",
+    // No "no" in the title: resolveModelPreference scores title tokens, and a bare "no" here
+    // made `no-such-model-xyz` resolve to this row instead of being rejected.
+    displayName: "Stub Haiku (effort-free)",
     description: "Stub non-effort model",
   },
 ];

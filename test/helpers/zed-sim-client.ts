@@ -91,6 +91,9 @@ function buildChildEnv(opts: ZedSimOptions): NodeJS.ProcessEnv {
   for (const key of PASS_THROUGH) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
+  // Never let the spawned adapter read the model catalogue from the real CLI: that read is a full
+  // `claude` session. The built-in list is enough for every wire test; `opts.env` can still override.
+  env.CLAUDE_TUI_MODEL_CATALOG = "builtin";
   if (opts.home !== undefined) {
     // Override HOME so transcript discovery is isolated (POSIX HOME, Windows USERPROFILE).
     env.HOME = opts.home;

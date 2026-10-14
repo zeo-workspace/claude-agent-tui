@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ClaudeAcpAgent } from "../dist/acp-agent.js";
-import { MODEL_CATALOG } from "../dist/model-catalog.js";
+import { STUB_MODEL_CATALOG, stubModelCatalogSource } from "./helpers/stub-model-catalog.ts";
 
 type FakeAgentEntry = { value: string; displayName: string; description?: string };
 
@@ -42,6 +42,8 @@ function makeAgent(agents: FakeAgentEntry[]) {
   return new ClaudeAcpAgent(client, undefined, undefined, {
     startEngine: startEngine as never,
     discoverAgents: () => agents,
+    // Hermetic picker: the switch target below is taken from these rows, not the host CLI's.
+    modelCatalogSource: stubModelCatalogSource,
   } as never);
 }
 
@@ -133,7 +135,7 @@ test("3.2 zero discovered personas → the `agent` option is ABSENT (the gate) (
 
 test("3.2 a model switch PRESERVES the `agent` option (reconcile rebuilds from the stored catalog) (R3.2)", async (t) => {
   // Pick a second, distinct catalog model to switch to (any real alias other than the seeded default).
-  const target = MODEL_CATALOG.find((m) => m.value !== "default") ?? MODEL_CATALOG[0];
+  const target = STUB_MODEL_CATALOG.find((m) => m.value !== "default") ?? STUB_MODEL_CATALOG[0];
   assert.ok(target, "the catalog must have at least one model to switch to");
 
   const agent = makeAgent(TWO_PERSONAS);
