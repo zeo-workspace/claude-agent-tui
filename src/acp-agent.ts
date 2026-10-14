@@ -101,6 +101,7 @@ import { createDiffEnrichedReader } from "./diff-enriched-reader.js";
 import { backgroundTaskEnds, type BackgroundTaskEnd } from "./background-task-end.js";
 import { readTranscriptPermissionMode } from "./resumed-permission-mode.js";
 import type { DiffEnrichedReaderOptions } from "./diff-enriched-reader.js";
+import { withPrecompactHistory, type PrecompactHistoryOptions } from "./compacted-history.js";
 import {
   sourceSubagentRows,
   defaultListSubagents,
@@ -734,6 +735,12 @@ export interface AgentDeps {
    * nothing → the reader uses its billing-free `~/.claude` glob + `fs` read defaults.
    */
   diffEnrichOptions?: DiffEnrichedReaderOptions;
+  /**
+   * Locate a session's transcript for the compacted-history replay ({@link withPrecompactHistory}).
+   * Defaults to `diffEnrichOptions.findTranscript`, then to the `~/.claude/projects` glob. Read only
+   * on `session/load` of a thread whose first SDK message is a compaction summary.
+   */
+  findTranscript?: (sessionId: string) => string[];
   /**
    * Story 044 (R4.1/R4.2) — opt IN to the live sub-agent watcher: the Option-B 2nd watcher that
    * POLLs the SDK sidechain readers while a turn is in flight, feeding the story-024 detector's
@@ -1616,6 +1623,7 @@ export class ClaudeAcpAgent implements Agent {
   private readonly startEngine: StartEngine;
   /** Override for the live JSONL reader the pump re-reads (default: SDK getSessionMessages). */
   private readonly getMessages?: GetMessages;
+  private readonly precompactOptions: PrecompactHistoryOptions;
   /** Story 041 — the sidechain readers the pump sources nested sub-agent rows from; default to the
    *  SDK's pure `listSubagents` / `getSubagentMessages` (tests inject stubs). */
   private readonly listSubagents: ListSubagents;
@@ -1683,6 +1691,10 @@ export class ClaudeAcpAgent implements Agent {
             },
           })
         : deps.getMessages;
+    this.precompactOptions = {
+      findTranscript: deps.findTranscript ?? deps.diffEnrichOptions?.findTranscript,
+      hydrateToolUseResult: deps.liveDiff ?? false,
+    };
     this.listSubagents = deps.listSubagents ?? defaultListSubagents;
     this.getSubagentMessages = deps.getSubagentMessages ?? defaultGetSubagentMessages;
     this.usageUpdate = deps.usageUpdate ?? false;
@@ -3030,9 +3042,14 @@ export class ClaudeAcpAgent implements Agent {
     // Read via the SAME seam + ordering the live tail pump uses (readOrderedMessages → getSessionMessages,
     // then linearizeTurns), so a LOADED thread orders identically to a LIVE one (story 026 R4.1/R4.2) and
     // an R1.3 SDK-drift error is surfaced loudly rather than swallowed.
-    const messages = await readOrderedMessages(sessionId, session.cwd, {
-      getMessages: this.getMessages,
-    });
+    // getSessionMessages stops at the last compaction boundary; put the history before it back, so a
+    // reopened compacted thread scrolls to its first prompt (ported from plus). Replay-only on purpose:
+    // the live pump has already emitted that history, and its detector cursor counts SDK messages.
+    const messages = await withPrecompactHistory(
+      sessionId,
+      await readOrderedMessages(sessionId, session.cwd, { getMessages: this.getMessages }),
+      this.precompactOptions,
+    );
 
     // Emit through the SHARED source+merge+linearize+emit loop the live pump runs — top-level turns
     // (toAcpNotifications + structuredPatch diff + optional usage_update) AND the nested sub-agent rows

@@ -111,7 +111,43 @@ function isSidechainMsg(m: SessionMessage): boolean {
 function isMetaMsg(m: SessionMessage): boolean {
   const rec = m as Record<string, unknown>;
   if (rec.isMeta === true) return true;
+  if (isReplayHiddenMetaMessage(m)) return true;
   return m.type === "summary" || m.type === "system";
+}
+
+/** Origin kinds of the meta user messages `getSessionMessages` returns since SDK 0.3.284 (messages
+ *  from other agents, sessions and channels) — the SDK's own inclusion set for meta rows. */
+const REPLAY_HIDDEN_META_ORIGIN_KINDS = new Set([
+  "peer",
+  "channel",
+  "observer",
+  "observer-activity",
+  "slack-ping",
+]);
+
+/**
+ * True for a transcript message delivered to the model from another agent, session or channel.
+ * Since SDK 0.3.284 `getSessionMessages` returns these as `is_meta` user messages whose content is
+ * the full harness framing (envelope XML plus the "not typed by your user" preamble). The user never
+ * typed them, so they are never a turn — on `session/load` replay AND on the live pump, which reads
+ * the same SDK reader here. Other `is_meta` messages (compaction summaries) are kept. Ported from
+ * claude-agent-plus, which took it from upstream #1208.
+ *
+ * `is_meta` and `origin` are runtime fields the SDK does not declare on `SessionMessage`.
+ */
+export function isReplayHiddenMetaMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") return false;
+  const { type, is_meta, origin } = message as {
+    type?: unknown;
+    is_meta?: unknown;
+    origin?: { kind?: unknown } | null;
+  };
+  return (
+    type === "user" &&
+    is_meta === true &&
+    typeof origin?.kind === "string" &&
+    REPLAY_HIDDEN_META_ORIGIN_KINDS.has(origin.kind)
+  );
 }
 
 /** Parent uuid when carried by the input (raw fixture / fallback); `null` otherwise. */
