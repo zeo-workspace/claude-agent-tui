@@ -17,6 +17,7 @@ import {
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
 } from "../dist/model-catalog.js";
+import { stubModelCatalogSource } from "./helpers/stub-model-catalog.ts";
 
 function makeAgent() {
   const client = {
@@ -37,7 +38,11 @@ function makeAgent() {
     watcher: { stop() {}, notifyEndOfTurn() {} },
     cwd: args.cwd,
   });
-  return new ClaudeAcpAgent(client, undefined, undefined, { startEngine: startEngine as never });
+  return new ClaudeAcpAgent(client, undefined, undefined, {
+    startEngine: startEngine as never,
+    // Hermetic: never read the host CLI's picker (item 93).
+    modelCatalogSource: stubModelCatalogSource,
+  });
 }
 
 const configOptions = (agent: ClaudeAcpAgent, sessionId: string) =>

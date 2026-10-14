@@ -53,6 +53,8 @@ interface CatalogLogger {
 interface CacheEntry {
   models: ModelInfo[];
   at: number;
+  /** The source that produced `models`: a cached read is served only to a caller of the same source. */
+  source: SupportedModelsSource;
 }
 let cache: CacheEntry | null = null;
 /** Whether the fallback has already been reported in this process. See {@link resolveModelCatalog}. */
@@ -156,7 +158,9 @@ export async function resolveModelCatalog(
   logger?: CatalogLogger,
   source: SupportedModelsSource = defaultSource,
 ): Promise<ModelInfo[]> {
-  if (cache && Date.now() - cache.at < CATALOG_TTL_MS) return cache.models;
+  // Keyed by source, so an injected catalogue never answers for the CLI and vice versa (item 93).
+  if (cache && cache.source === source && Date.now() - cache.at < CATALOG_TTL_MS)
+    return cache.models;
   try {
     const raw = await withTimeout(source(), CATALOG_TIMEOUT_MS);
     if (!Array.isArray(raw) || raw.length === 0) {
@@ -167,7 +171,7 @@ export async function resolveModelCatalog(
     // was empty — already excluded above. Guard anyway: an empty picker is worse
     // than a stale one, and this function must never return one.
     const resolved = models.length > 0 ? models : raw;
-    cache = { models: resolved, at: Date.now() };
+    cache = { models: resolved, at: Date.now(), source };
     return resolved;
   } catch (error) {
     // `log`, NOT `error`, and ONCE per process. Both halves are deliberate.

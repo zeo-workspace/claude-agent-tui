@@ -61,8 +61,10 @@ test("068 R1.2: a literal `[1m]` suffix still → 1M via the regex fallback", ()
   assert.equal(infer("sonnet[1m]"), 1_000_000);
 });
 
-test("068 R1.1: haiku → 200K", () => {
-  assert.equal(infer("haiku"), 200_000);
+test("item 93: haiku → 1M (plain `haiku` resolves to Haiku 5.5, native 1M)", () => {
+  // CLI 2.1.293 made `claude-haiku-5-5` the default Haiku: its baked-in catalogue entry is
+  // `context:{window:1e6,native_1m:!0}`. Seeding 200K made the context meter overstate usage 5x.
+  assert.equal(infer("haiku"), 1_000_000);
 });
 
 test("068 R1.2: unknown alias carrying a 1m token → 1M (regex fallback)", () => {
@@ -92,8 +94,10 @@ test("069 R3: the fallback rows are SELF-CONTAINED — version plus the picker's
   for (const m of catalog.MODEL_CATALOG) byValue[m.value] = m;
   assert.equal(byValue.opus.displayName, "Opus 5.5");
   assert.equal(byValue.opus.description, "Opus 5.5 with 1M context · Best for everyday, complex tasks");
-  assert.equal(byValue.sonnet.description, "Sonnet 5 with 1M context · Efficient for routine tasks");
-  assert.equal(byValue.haiku.description, "Haiku 4.5 · Fastest for quick answers");
+  assert.equal(byValue.sonnet.displayName, "Sonnet 5.5");
+  assert.equal(byValue.sonnet.description, "Sonnet 5.5 with 1M context · Most efficient for simpler tasks");
+  assert.equal(byValue.haiku.displayName, "Haiku 5.5");
+  assert.equal(byValue.haiku.description, "Haiku 5.5 with 1M context · Fastest for quick answers");
   assert.equal(byValue.fable.displayName, "Fable 5.1");
   assert.equal(
     byValue.fable.description,
@@ -124,11 +128,11 @@ test("072: modelSelectorDescription prepends the version/context label to the ta
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.sonnet),
-    "Sonnet 5 with 1M context · Efficient for routine tasks",
+    "Sonnet 5.5 with 1M context · Most efficient for simpler tasks",
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.haiku),
-    "Haiku 4.5 · Fastest for quick answers",
+    "Haiku 5.5 with 1M context · Fastest for quick answers",
   );
   // A label-less entry → bare tagline, no leading " · " (total-function safeguard).
   assert.equal(
@@ -182,9 +186,26 @@ test("071 R1.1: sonnet-5 → 1M (Sonnet 5 is native 1M — no smaller context va
   assert.equal(inferId("claude-sonnet-5-20260115"), 1_000_000);
 });
 
-test("069 R1.1: fable-5 → 1M; haiku → 200K", () => {
+test("069 R1.1: fable-5 → 1M; haiku 4.x → 200K", () => {
   assert.equal(inferId("claude-fable-5"), 1_000_000);
   assert.equal(inferId("claude-haiku-4-5"), 200_000);
+  assert.equal(inferId("claude-haiku-4-5-20251001"), 200_000);
+});
+
+test("item 93: the 5.5 ids are exact entries → 1M (Haiku 5.5 and Sonnet 5.5 are native 1M)", () => {
+  // Read from the CLI's baked-in catalogue (2.1.299): both carry `window:1e6, native_1m:!0`.
+  assert.equal(catalog.MODEL_ID_CONTEXT_WINDOWS["claude-haiku-5-5"], 1_000_000);
+  assert.equal(catalog.MODEL_ID_CONTEXT_WINDOWS["claude-sonnet-5-5"], 1_000_000);
+  assert.equal(inferId("claude-haiku-5-5"), 1_000_000);
+  assert.equal(inferId("claude-sonnet-5-5"), 1_000_000);
+});
+
+test("item 93: the Haiku heuristic is version-aware, like Sonnet's (5+ → 1M, 4.x → 200K)", () => {
+  // A dated snapshot or a provider-prefixed id misses the exact table and reaches the heuristic.
+  assert.equal(inferId("claude-haiku-5-5-20260601"), 1_000_000);
+  assert.equal(inferId("us.anthropic.claude-haiku-5-5"), 1_000_000);
+  assert.equal(inferId("claude-haiku-6"), 1_000_000);
+  assert.equal(inferId("claude-haiku-4-5@20251001"), 200_000);
 });
 
 test("069 R1.2: unknown ID carrying a 1m token → 1M (regex fallback)", () => {
