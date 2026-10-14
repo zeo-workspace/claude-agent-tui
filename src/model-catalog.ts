@@ -17,8 +17,8 @@ import type { ClientCapabilities, SessionConfigOption } from "@agentclientprotoc
 
 /**
  * Effort levels offered for reasoning-capable models — the SDK's `supportedEffortLevels` vocabulary.
- * Story 060: exported so the ultracode guard test can assert membership stays the five real levels
- * (it must NEVER contain {@link ULTRACODE_EFFORT}; the real `--effort` enum is exactly this set).
+ * Exactly the real `--effort` enum. Ultracode is NOT a level (item 84): it is its own switch, see
+ * {@link ULTRACODE_CONFIG_ID}.
  */
 export const REASONING_EFFORT_LEVELS: NonNullable<ModelInfo["supportedEffortLevels"]> = [
   "low",
@@ -27,20 +27,6 @@ export const REASONING_EFFORT_LEVELS: NonNullable<ModelInfo["supportedEffortLeve
   "xhigh",
   "max",
 ];
-
-/**
- * Story 060 — the "ultracode" pseudo-level sentinel for the effort selector. NOT a real `--effort`
- * value (claude 2.1.195 rejects `--effort ultracode`; the enum stays {@link REASONING_EFFORT_LEVELS}).
- * Selecting it maps to `--effort xhigh` PLUS activating the ultracode keyword-trigger for the session
- * (story 060 Task 3). Kept OUT of REASONING_EFFORT_LEVELS so no real-effort code path ever emits it.
- */
-export const ULTRACODE_EFFORT = "ultracode";
-
-/** The real effort level the ultracode pseudo-level maps to (its documented effort component). */
-export const ULTRACODE_EFFORT_LEVEL = "xhigh";
-
-/** Selector label — makes clear it is xhigh + orchestration, NOT a duplicate of the plain `xhigh` entry. */
-export const ULTRACODE_EFFORT_LABEL = "ultracode (xhigh + orchestration)";
 
 /**
  * The FALLBACK model list — no longer what the picker normally shows.
@@ -406,6 +392,137 @@ export function classifyFastModeSignal(raw: string): FastModeSignal {
   // No gate line. If the panel finished rendering (anchor present), the On/Off toggle is usable.
   if (FAST_PANEL_ANCHORS.some((re) => re.test(text))) return "available";
   return "pending"; // panel not rendered yet → keep waiting within the caller's bounded window
+}
+
+// --- Item 84 — Ultracode as its own switch ----------------------------------------------------------
+// Ultracode is "standing dynamic-workflow orchestration at any effort level", session-scoped. It used
+// to be an `ultracode (xhigh + orchestration)` notch in the effort select (story 060) that forced
+// xhigh, prefixed every prompt with the `ultracode` keyword and wrote a settings key the CLI does not
+// read. The CLI (2.1.296+) exposes it as `/effort ultracode on|off`, independent of the effort level,
+// and that is what this switch drives — built like the fast-mode option above.
+
+/** Item 84 — the Ultracode config-option id. */
+export const ULTRACODE_CONFIG_ID = "ultracode";
+
+/**
+ * Item 84 — the CLI command that turns Ultracode on or off for the session. Always the explicit
+ * `on|off` form: never a bare `/effort ultracode`, whose meaning the CLI has changed between builds.
+ */
+export function ultracodeCommand(on: boolean): string {
+  return on ? "/effort ultracode on" : "/effort ultracode off";
+}
+
+/**
+ * Item 84 — can this model run Ultracode? The CLI's own gate is "workflows are enabled AND the model
+ * supports xhigh"; the first half is not knowable from here (managed settings, org policy, env), so
+ * this checks the second and the CLI's refusal reply ({@link classifyUltracodeReply}) covers the rest.
+ */
+export function isUltracodeCapableModel(info: ModelInfo | undefined): boolean {
+  return info?.supportsEffort === true && (info.supportedEffortLevels ?? []).includes("xhigh");
+}
+
+/** Item 84 — the switch is on while this is true; a boolean payload or the on/off select string. */
+export function resolveUltracodeEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  return value === FAST_MODE_ON;
+}
+
+const ULTRACODE_DESCRIPTION = "Run dynamic workflows on every task (/effort ultracode).";
+
+/**
+ * Item 84 — build the `ultracode` config option: `type:"boolean"` when the client advertised boolean
+ * config options, else an on/off select, exactly as {@link createFastModeConfigOption} does. When the
+ * CLI refused the last attempt, `refusal` is appended to the description so the reason the switch
+ * went back off is visible where the switch is.
+ */
+export function createUltracodeConfigOption(
+  enabled: boolean,
+  useBooleanOption: boolean,
+  refusal?: string,
+): SessionConfigOption {
+  const base = {
+    id: ULTRACODE_CONFIG_ID,
+    name: "Ultracode",
+    description: refusal ? `${ULTRACODE_DESCRIPTION} Off: ${refusal}` : ULTRACODE_DESCRIPTION,
+    category: "model_config" as const,
+  };
+  if (useBooleanOption) {
+    return { ...base, type: "boolean", currentValue: enabled };
+  }
+  return {
+    ...base,
+    type: "select",
+    currentValue: enabled ? FAST_MODE_ON : FAST_MODE_OFF,
+    options: [
+      { value: FAST_MODE_OFF, name: "Off", description: "No standing orchestration." },
+      {
+        value: FAST_MODE_ON,
+        name: "On",
+        description: "Dynamic workflows on every task, at the current effort level.",
+      },
+    ],
+  };
+}
+
+/**
+ * Item 84 — what the CLI answered to `/effort ultracode on`:
+ *   - `refused`  — one of its two refusals; `reason` is the sentence to show the user.
+ *   - `on`       — "Ultracode on (this session only): …".
+ *   - `pending`  — neither yet; keep reading until the caller's window closes.
+ */
+export type UltracodeReply =
+  { kind: "refused"; reason: string } | { kind: "on" } | { kind: "pending" };
+
+/**
+ * Turn PTY output into plain text for phrase matching. Unlike {@link stripControlSequences}, a cursor-
+ * forward (`ESC [ n C`) becomes a space: Ink may draw a space by moving the cursor, and dropping it
+ * would glue two words together. Whitespace runs (line wraps included) collapse to one space.
+ */
+function ptyTextForMatching(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  const spaced = raw.replace(/\x1b\[\d*C/g, " ");
+  return stripControlSequences(spaced).replace(/\s+/g, " ");
+}
+
+/**
+ * Item 84 — classify the CLI's reply to `/effort ultracode on`. The two refusals are the CLI's own
+ * strings (claude 2.1.299, `/effort` handler):
+ *   `Ultracode needs dynamic workflows enabled (see /config). Valid options are: …`
+ *   `Ultracode isn't available on <model>. Valid options are: …`
+ * and its confirmation is `Ultracode on (this session only): …`. When the captured text holds more
+ * than one (a repaint can carry an older answer), the one written LAST is the answer to this command.
+ */
+export function classifyUltracodeReply(raw: string): UltracodeReply {
+  const text = ptyTextForMatching(raw);
+  const last = (re: RegExp): { at: number; match: RegExpMatchArray } | undefined => {
+    let found: { at: number; match: RegExpMatchArray } | undefined;
+    for (const match of text.matchAll(re)) found = { at: match.index ?? 0, match };
+    return found;
+  };
+  const candidates: Array<{ at: number; reply: UltracodeReply }> = [];
+  const workflows = last(/ultracode needs dynamic workflows enabled/gi);
+  if (workflows) {
+    candidates.push({
+      at: workflows.at,
+      reply: {
+        kind: "refused",
+        reason: "Ultracode needs dynamic workflows enabled (see /config).",
+      },
+    });
+  }
+  const model = last(/ultracode isn['\u2019]?t available on (\S+)/gi);
+  if (model) {
+    const name = model.match[1].replace(/\.$/, "");
+    candidates.push({
+      at: model.at,
+      reply: { kind: "refused", reason: `Ultracode isn't available on ${name}.` },
+    });
+  }
+  const on = last(/ultracode on \(this session only\)/gi);
+  if (on) candidates.push({ at: on.at, reply: { kind: "on" } });
+  if (candidates.length === 0) return { kind: "pending" };
+  candidates.sort((a, b) => b.at - a.at);
+  return candidates[0].reply;
 }
 
 /** The safe fallback entry, kept as a named export so callers can seed/anchor on it without a lookup. */

@@ -135,14 +135,17 @@ import {
   createFastModeConfigOption,
   clientSupportsBooleanConfigOptions,
   resolveFastModeEnabled,
-  ULTRACODE_EFFORT,
-  ULTRACODE_EFFORT_LEVEL,
-  ULTRACODE_EFFORT_LABEL,
+  ULTRACODE_CONFIG_ID,
+  ultracodeCommand,
+  isUltracodeCapableModel,
+  resolveUltracodeEnabled,
+  createUltracodeConfigOption,
+  classifyUltracodeReply,
 } from "./model-catalog.js";
 import { resolveModelCatalog, type SupportedModelsSource } from "./live-model-catalog.js";
-// Story 060 (R2.2/R2.3/R3.2) — the declarative spawn-time complement to the live ultracode keyword:
-// toggle the {ultracode,ultracodeKeywordTrigger} keys in the gate's per-session scratch settings file
-// (preserving the hook + every other key). Lives in the gate's settings-writer so it reuses durableWrite.
+// Item 84 — mirror the Ultracode switch into the gate's per-session scratch settings file as
+// `ultracode:true`, so a re-spawn of this session keeps it (`/effort ultracode on` is session-scoped
+// and a fresh PTY would not have it). Lives in the gate's settings-writer so it reuses durableWrite.
 import { applyUltracodeSettings } from "./gate/settings-writer.js";
 import { discoverAgents, type AgentCatalogEntry } from "./agent-catalog.js";
 // Story 063 (R1) — OFFLINE disk discovery of the `available_commands` set (custom slash-commands +
@@ -352,12 +355,25 @@ type Session = {
    */
   pendingEffortInjection?: string;
   /**
-   * Story 060 (R2.1/R2.2) — true WHILE the "ultracode" effort-selector sentinel is selected for this
-   * session. The LIVE activation it drives is a keyword prefix on the OUTGOING prompt (the binary's
-   * documented per-turn Workflow opt-in) — Option A, no re-spawn. Cleared when a real effort level (or
-   * `default`) is re-selected. The declarative spawn-time complement is {@link applyUltracodeSettings}.
+   * Item 84 — the user's Ultracode intent for this session (default off), set by
+   * {@link applyUltracodeChange} and cleared when the CLI refuses it. It survives a model switch: the
+   * option hides on a model that cannot run Ultracode and shows again, still on, when switching back —
+   * the CLI keeps the request the same way. Independent of the effort level.
    */
-  ultracodeActive?: boolean;
+  ultracodeOn?: boolean;
+  /**
+   * Item 84 — the CLI's reason for refusing the last `/effort ultracode on`, shown in the option's
+   * description. `scope: "model"` (the model cannot run it) is cleared by a model switch;
+   * `scope: "workflows"` (dynamic workflows are disabled) is not, because a switch does not change it.
+   */
+  ultracodeRefusal?: { scope: "model" | "workflows"; reason: string };
+  /**
+   * Item 84 — a `/effort ultracode on|off` requested WHILE a turn is in flight is deferred here
+   * (last-write-wins) and flushed once the turn settles (mirrors {@link pendingEffortInjection}).
+   */
+  pendingUltracodeInjection?: boolean;
+  /** Item 84 — stops the reply watch of the last `/effort ultracode on`, while one is running. */
+  ultracodeReplyStop?: () => void;
   /**
    * Story 073 (R2.3/R3.2) — the session's CURRENT fast-mode on/off state (default off). Set by
    * {@link applyFastModeChange} and read by {@link buildConfigOptions} for the `fast` option's
@@ -1439,6 +1455,11 @@ const MODE_CYCLE_POLL_MS = 50;
  *  (experiments/probe-c-model-then-prompt.mjs: the dialog rendered + the switch applied within it). */
 const MODEL_CONFIRM_DELAY_MS = 800;
 
+/** Item 84 — how long to watch the terminal for the CLI's answer to `/effort ultracode on`. */
+const ULTRACODE_REPLY_WINDOW_MS = 5000;
+/** Item 84 — the tail of terminal output kept while watching for that answer. */
+const ULTRACODE_REPLY_BUFFER_CHARS = 8192;
+
 /**
  * Builds the label for the "Always Allow" permission option so the user can see
  * the exact scope they are committing to. Uses the SDK-provided suggestions
@@ -1968,11 +1989,9 @@ export class ClaudeAcpAgent implements Agent {
     sessionRecord.turnTempImagePaths = turnTempImagePaths;
     const payload = promptToClaude(params, this.logger, turnTempImagePaths);
 
-    // Story 060 (R2.2) — while ultracode is active, prefix the OUTGOING prompt with the `ultracode`
-    // keyword (the binary's per-turn Workflow opt-in). This is the LIVE activation that needs no
-    // re-spawn (Option A) and works pre- AND post-first-interaction; the scratch settings keys are the
-    // declarative spawn-time complement. NEVER emitted as a `/effort` value (R1.2).
-    const outgoing = sessionRecord.ultracodeActive ? `${ULTRACODE_EFFORT} ${payload}` : payload;
+    // Item 84: the prompt goes out as typed. Ultracode is a session switch the CLI holds
+    // (`/effort ultracode on`), not a keyword prepended to every prompt.
+    const outgoing = payload;
 
     // (2) Register the turn with the story-024 resolver: the detector that the live pump feeds, and
     // the awaitable that settles ONCE with { stopReason: mapStopReason(...) } on the terminal
@@ -2021,7 +2040,7 @@ export class ClaudeAcpAgent implements Agent {
       sessionRecord.subagentWatcher?.stop();
       sessionRecord.subagentWatcher = undefined;
       // Story 046 (R1.3): the session is idle again — flush any model switch deferred mid-turn.
-      this.flushPendingControlInjections(sessionRecord);
+      this.flushPendingControlInjections(params.sessionId, sessionRecord);
     }
   }
 
@@ -2250,6 +2269,20 @@ export class ClaudeAcpAgent implements Agent {
       );
       return { configOptions: session.configOptions };
     }
+    // Item 84: the `ultracode` switch, same shape as `fast` above — a boolean payload bypasses the
+    // string-only validation below; the on/off string of the select fallback goes through it.
+    if (params.configId === ULTRACODE_CONFIG_ID && typeof params.value === "boolean") {
+      const option = session.configOptions.find((o) => o.id === ULTRACODE_CONFIG_ID);
+      if (!option) {
+        throw new Error(`Unknown config option: ${params.configId}`);
+      }
+      await this.applyUltracodeChange(params.sessionId, session, params.value);
+      session.configOptions = this.rebuildConfigOptionsPreserving(
+        session,
+        this.currentModel(session),
+      );
+      return { configOptions: session.configOptions };
+    }
     if (typeof params.value !== "string") {
       throw new Error(`Invalid value for config option ${params.configId}: ${params.value}`);
     }
@@ -2327,9 +2360,9 @@ export class ClaudeAcpAgent implements Agent {
       // mirroring /model — no re-spawn, works before the first interaction. Mid-turn it defers; it never
       // throws, so applyConfigOptionValue below always commits the new currentValue (optimistic, like
       // /model). The flag path stays only to seed/preserve effort across mode/agent re-spawns.
-      // Story 060 (R2/R3.2): route through applyEffortSelection so the `ultracode` sentinel is
-      // special-cased (activate keyword + scratch keys + /effort xhigh) while real levels deselect it.
-      await this.applyEffortSelection(session, resolvedValue);
+      // Item 84: Ultracode is no longer an effort value, and an effort change leaves it alone (the
+      // CLI keeps it "at any effort level").
+      this.applyEffortChange(session, resolvedValue);
     } else if (params.configId === "agent") {
       // Story 056 (R3.3/R3.4): the agent persona has no live mid-session path either — apply it by an
       // in-place re-spawn carrying `--agent` (mirrors effort). On throw, applyConfigOptionValue below is
@@ -2341,6 +2374,18 @@ export class ClaudeAcpAgent implements Agent {
       // commits the new currentValue (optimistic, like /effort). This is the SELECT (on/off string)
       // path; a boolean payload is resolved earlier (story 074, R4.3). resolveFastModeEnabled unifies both.
       this.applyFastModeChange(session, resolveFastModeEnabled(resolvedValue));
+    } else if (params.configId === ULTRACODE_CONFIG_ID) {
+      // Item 84 — the on/off select fallback of the Ultracode switch.
+      await this.applyUltracodeChange(
+        params.sessionId,
+        session,
+        resolveUltracodeEnabled(resolvedValue),
+      );
+      session.configOptions = this.rebuildConfigOptionsPreserving(
+        session,
+        this.currentModel(session),
+      );
+      return { configOptions: session.configOptions };
     }
 
     await this.applyConfigOptionValue(params.sessionId, session, params.configId, resolvedValue);
@@ -2453,7 +2498,7 @@ export class ClaudeAcpAgent implements Agent {
    * prompt()'s finally, the moment the turn settles). Last-write-wins: only the most recent queued
    * alias is injected; the field is cleared so a settled session with nothing queued injects nothing.
    */
-  private flushPendingControlInjections(session: Session): void {
+  private flushPendingControlInjections(sessionId: string, session: Session): void {
     if (session.turnDetector !== undefined) return; // still not idle (defensive)
     const alias = session.pendingModelInjection;
     if (alias !== undefined) {
@@ -2471,6 +2516,12 @@ export class ClaudeAcpAgent implements Agent {
     if (fast !== undefined) {
       session.pendingFastInjection = undefined;
       this.injectFastCommand(session, fast);
+    }
+    // Item 84 — flush a deferred `/effort ultracode on|off` too (last-write-wins).
+    const ultracode = session.pendingUltracodeInjection;
+    if (ultracode !== undefined) {
+      session.pendingUltracodeInjection = undefined;
+      this.injectUltracodeCommand(sessionId, session, ultracode);
     }
   }
 
@@ -2575,15 +2626,9 @@ export class ClaudeAcpAgent implements Agent {
       // does not reset the others — the argv carries all three flags. There are three selectors now
       // (Story 056 added agent): a mode re-spawn keeps effort+agent, an agent re-spawn keeps mode+effort.
       const permissionMode = change.permissionMode ?? session.modes.currentModeId;
-      // Story 060 (R1.2 fix): the preserved currentEffort can be the `ultracode` SENTINEL (it is the
-      // committed configOption value while active). It is NOT a real `--effort` enum value — the binary
-      // rejects `--effort ultracode` (story-060 probe), so a mode/agent re-spawn-while-active would
-      // silently degrade effort to default. Map the sentinel to its real component (xhigh) at THIS spawn
-      // seam (it feeds BOTH buildClaudeCmd and buildResumeArgv); the scratch `ultracode:true` already
-      // carries the orchestration activation declaratively at spawn.
-      const preservedEffort = change.effortLevel ?? this.currentEffort(session);
-      const effortLevel =
-        preservedEffort === ULTRACODE_EFFORT ? ULTRACODE_EFFORT_LEVEL : preservedEffort;
+      // Item 84: Ultracode is not an effort value any more, so the effort carries over as is; the
+      // Ultracode switch reaches the new PTY through the scratch settings' `ultracode:true`.
+      const effortLevel = change.effortLevel ?? this.currentEffort(session);
       const agent = change.agent ?? this.currentAgent(session);
       // Story 057 (R2.4): REGENERATE the MCP scratch so the re-spawned `claude` reads the CURRENT MCP
       // config at startup (its `--mcp-config` is bound only at spawn). Re-translate from the stored raw
@@ -2653,52 +2698,120 @@ export class ClaudeAcpAgent implements Agent {
     return typeof opt?.currentValue === "string" ? opt.currentValue : undefined;
   }
 
+  /** Item 84 — the session's current model configOption value (`default` when absent). */
+  private currentModel(session: Session): string {
+    const opt = session.configOptions.find((o) => o.id === "model");
+    return typeof opt?.currentValue === "string" ? opt.currentValue : DEFAULT_MODEL_INFO.value;
+  }
+
   /**
-   * Story 060 (R2/R3.2) — apply an effort-selector choice, special-casing the `ultracode` sentinel.
-   *
-   * Selecting `ultracode` (Option A — keyword + scratch, NO re-spawn): activate the session flag (which
-   * makes {@link prompt} prefix the OUTGOING prompt with the `ultracode` keyword — the binary's per-turn
-   * Workflow opt-in, the effective live mechanism), write the scratch ultracode keys via
-   * {@link applyUltracodeSettings} (the declarative spawn-time complement), and set the effort to xhigh
-   * through the SAME live `/effort` inject as every other level — NEVER `/effort ultracode` (R1.2). The
-   * `already` guard suppresses a redundant `/effort xhigh` re-inject when ultracode is re-selected while
-   * already active.
-   *
-   * Selecting a real level (or `default`) DEACTIVATES ultracode: clear the flag, remove the scratch keys,
-   * then apply that level through {@link applyEffortChange} (whose own no-op guard handles a same-level
-   * pick). `applyConfigOptionValue` (the caller, after this returns) commits the selector's currentValue,
-   * which for `ultracode` correctly stays `"ultracode"` (the {@link buildConfigOptions} `includes` guard
-   * keeps it valid across rebuilds).
+   * Item 84 — turn the Ultracode switch on or off, LIVE via `/effort ultracode on|off` through the
+   * session's terminal, exactly as {@link applyFastModeChange} drives `/fast`: no re-spawn, no turn,
+   * works before the first prompt, deferred while a turn is in flight. Turning it on clears a previous
+   * refusal (the user is retrying). The scratch settings mirror the intent so a re-spawn keeps it.
+   * A no-op change sends nothing.
    */
-  private async applyEffortSelection(session: Session, value: string): Promise<void> {
-    if (value === ULTRACODE_EFFORT) {
-      const already = session.ultracodeActive === true;
-      session.ultracodeActive = true;
-      // The gate's per-session SCRATCH settings file is the spawn's `--settings` target; on a live
-      // Session it is reachable via `session.gate?.settingsPath` (the value createSession also threads
-      // into StartEngineArgs.settingsFile). Absent on a no-gate / resume / replay session → keyword-only.
-      const scratchPath = session.gate?.settingsPath;
-      if (scratchPath) {
-        // Declarative scratch keys for any future (re-)spawn (NOT a re-spawn trigger — Option A).
-        await applyUltracodeSettings(scratchPath, true);
-      }
-      // Effort component is xhigh, applied via the live /effort inject — but only when not already active
-      // (re-selecting ultracode must not re-inject `/effort xhigh`). applyEffortChange's own no-op guard
-      // also short-circuits if xhigh already equals the current effort.
-      if (!already) {
-        this.applyEffortChange(session, ULTRACODE_EFFORT_LEVEL);
-      }
+  private async applyUltracodeChange(
+    sessionId: string,
+    session: Session,
+    enabled: boolean,
+  ): Promise<void> {
+    if (enabled) session.ultracodeRefusal = undefined;
+    if (enabled === (session.ultracodeOn ?? false)) return;
+    session.ultracodeOn = enabled;
+    await this.mirrorUltracodeIntoScratch(session, enabled);
+    if (session.turnDetector !== undefined) {
+      // A turn is in flight — injecting mid-turn corrupts the PTY input. Defer (mirrors /effort).
+      session.pendingUltracodeInjection = enabled;
       return;
     }
-    // A real level (or `default`) was chosen → deactivate ultracode before applying it.
-    if (session.ultracodeActive) {
-      session.ultracodeActive = false;
-      const scratchPath = session.gate?.settingsPath;
-      if (scratchPath) {
-        await applyUltracodeSettings(scratchPath, false);
-      }
+    this.injectUltracodeCommand(sessionId, session, enabled);
+  }
+
+  /** Item 84 — keep `ultracode:true` in the scratch `--settings` file only while the switch is on. */
+  private async mirrorUltracodeIntoScratch(session: Session, enabled: boolean): Promise<void> {
+    const scratchPath = session.gate?.settingsPath;
+    if (!scratchPath) return; // no gate (resume/replay/test) → nothing to keep in sync
+    try {
+      await applyUltracodeSettings(scratchPath, enabled);
+    } catch (err) {
+      // Degraded, not fatal: the live command still applies; only a later re-spawn would miss it.
+      this.logger.error(
+        `[ultracode] event=scratch_write_failed enabled=${enabled} path=${scratchPath}: ${String(err)}`,
+      );
     }
-    this.applyEffortChange(session, value);
+  }
+
+  /**
+   * Item 84 — side-channel `/effort ultracode on|off` write (synchronous, never a turn; `/effort`
+   * applies inline, no confirmation panel). After an `on`, watch the terminal for a bounded window
+   * for the CLI's answer: one of its two refusals turns the switch back off with the reason
+   * ({@link handleUltracodeRefusal}); its confirmation, or silence, ends the watch.
+   */
+  private injectUltracodeCommand(sessionId: string, session: Session, on: boolean): void {
+    session.ultracodeReplyStop?.();
+    session.ultracodeReplyStop = undefined;
+    if (on) this.watchUltracodeReply(sessionId, session);
+    sendPrompt(session.pty, ultracodeCommand(on), (fn) => fn());
+  }
+
+  private watchUltracodeReply(sessionId: string, session: Session): void {
+    let buffer = "";
+    let done = false;
+    const subscription = session.pty.onData((chunk: string) => {
+      if (done) return;
+      // Bounded: the reply is one short line; never let a chatty PTY grow this without limit.
+      buffer = (buffer + chunk).slice(-ULTRACODE_REPLY_BUFFER_CHARS);
+      const reply = classifyUltracodeReply(buffer);
+      if (reply.kind === "pending") return;
+      stop();
+      if (reply.kind === "refused") {
+        this.handleUltracodeRefusal(sessionId, session, reply.reason).catch((err: unknown) =>
+          this.logger.error(
+            `[ultracode] event=refusal_handling_failed sessionId=${sessionId}: ${String(err)}`,
+          ),
+        );
+      }
+    });
+    // `onData` never fires synchronously, so `cancelTimer` is always assigned before `stop` runs.
+    const stop = () => {
+      if (done) return;
+      done = true;
+      subscription.dispose();
+      cancelTimer();
+      if (session.ultracodeReplyStop === stop) session.ultracodeReplyStop = undefined;
+    };
+    const cancelTimer = this.schedule(stop, ULTRACODE_REPLY_WINDOW_MS);
+    session.ultracodeReplyStop = stop;
+  }
+
+  /**
+   * Item 84 — the CLI refused `/effort ultracode on`: the switch goes back off, the reason is kept for
+   * the option's description, the scratch key is removed, and the client gets the new options.
+   */
+  private async handleUltracodeRefusal(
+    sessionId: string,
+    session: Session,
+    reason: string,
+  ): Promise<void> {
+    session.ultracodeOn = false;
+    session.pendingUltracodeInjection = undefined;
+    session.ultracodeRefusal = {
+      scope: /dynamic workflows/i.test(reason) ? "workflows" : "model",
+      reason,
+    };
+    // WARN-level by meaning (degraded, recovered by switching off); this logger has no warn.
+    this.logger.log(`[ultracode] event=refused sessionId=${sessionId} reason="${reason}"`);
+    await this.mirrorUltracodeIntoScratch(session, false);
+    if (!this.sessions[sessionId]) return; // torn down meanwhile
+    session.configOptions = this.rebuildConfigOptionsPreserving(
+      session,
+      this.currentModel(session),
+    );
+    await this.client.sessionUpdate({
+      sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions: session.configOptions },
+    });
   }
 
   /**
@@ -2821,6 +2934,7 @@ export class ClaudeAcpAgent implements Agent {
       session.fastModeAvailable ?? false,
       session.fastModeOn ?? false,
       clientSupportsBooleanConfigOptions(this.clientCapabilities),
+      { on: session.ultracodeOn ?? false, refusal: session.ultracodeRefusal?.reason },
     );
   }
 
@@ -3536,6 +3650,9 @@ export class ClaudeAcpAgent implements Agent {
       if (previousModelId !== value) {
         session.fastModeOn = false;
         session.fastModeAvailable = false;
+        // Item 84 — Ultracode's intent survives the switch (the option just hides on a model that
+        // cannot run it); a refusal about the OLD model no longer applies.
+        if (session.ultracodeRefusal?.scope === "model") session.ultracodeRefusal = undefined;
       }
       session.configOptions = buildConfigOptions(
         session.modes,
@@ -3547,6 +3664,7 @@ export class ClaudeAcpAgent implements Agent {
         session.fastModeAvailable ?? false,
         session.fastModeOn ?? false,
         clientSupportsBooleanConfigOptions(this.clientCapabilities),
+        { on: session.ultracodeOn ?? false, refusal: session.ultracodeRefusal?.reason },
       );
 
       // Story 073 (R4.2) — on a switch TO an Opus model, re-run availability detection out of band and
@@ -3835,6 +3953,10 @@ export class ClaudeAcpAgent implements Agent {
       settingsManager.getSettings().effortLevel,
       agents,
       undefined,
+      false,
+      false,
+      // Item 84: the Ultracode switch shows from the first options, so negotiate its type here.
+      clientSupportsBooleanConfigOptions(this.clientCapabilities),
     );
 
     // Runtime cwd is read from inside the JSONL (story 015); fall back to the requested host cwd
@@ -3986,6 +4108,7 @@ function buildConfigOptions(
   fastAvailable = false,
   currentFast = false,
   fastUsesBooleanOption = false,
+  ultracode: { on: boolean; refusal?: string } = { on: false },
 ): SessionConfigOption[] {
   const options: SessionConfigOption[] = [
     {
@@ -4049,15 +4172,9 @@ function buildConfigOptions(
           .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
           .join(" "),
       })),
-      // Story 060 (R1.1) — the "ultracode" sentinel, LAST and after the five real levels. NOT a real
-      // `--effort` value (claude rejects `--effort ultracode`); it maps to xhigh + orchestration (Task 3).
-      { value: ULTRACODE_EFFORT, name: ULTRACODE_EFFORT_LABEL },
     ];
 
-    // `ultracode` is a valid current value so a configOptions rebuild (e.g. after a re-spawn) does not
-    // reset a selected ultracode back to "default". It stays OUT of supportedLevels (real --effort enum).
-    const includes = (l: string) =>
-      l === "default" || l === ULTRACODE_EFFORT || (supportedLevels as string[]).includes(l);
+    const includes = (l: string) => l === "default" || (supportedLevels as string[]).includes(l);
     const validEffort =
       currentEffortLevel && includes(currentEffortLevel) ? currentEffortLevel : "default";
 
@@ -4070,6 +4187,15 @@ function buildConfigOptions(
       currentValue: validEffort,
       options: effortOptions,
     });
+  }
+
+  // Item 84 — the Ultracode switch, right after effort and only on a model that can run it (xhigh).
+  // Same boolean-or-select negotiation as fast mode. Hidden, not cleared, on other models: the
+  // session keeps the intent and the switch reappears, still on, on a capable model.
+  if (isUltracodeCapableModel(currentModelInfo)) {
+    options.push(
+      createUltracodeConfigOption(ultracode.on, fastUsesBooleanOption, ultracode.refusal),
+    );
   }
 
   // Story 056 (R3.2) — the `agent` (main-thread persona) selector, mirroring the effort option but

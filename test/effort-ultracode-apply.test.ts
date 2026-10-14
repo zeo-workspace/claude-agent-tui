@@ -1,20 +1,17 @@
-// Story 060 / Task 3.1 — select/deselect wiring for the `ultracode` effort-selector sentinel
-// (R2.1, R2.2, R2.3, R3.2, R1.2).
+// Item 84 — the Ultracode switch, applied through the session's terminal (PARITY-REPORT §21.2/§21.7).
 //
-// APPROVED ARCHITECTURE "Option A: keyword live + settings scratch (NO dedicated re-spawn)":
-//   - Selecting `ultracode` activates a per-session flag (`session.ultracodeActive`), writes the
-//     declarative scratch keys ({ultracode,ultracodeKeywordTrigger}) into the gate's scratch settings
-//     file, and applies its EFFORT component (xhigh) through the SAME live `/effort` inject as every
-//     real level — NEVER `/effort ultracode` (R1.2).
-//   - The LIVE activation is a KEYWORD PREFIX on the OUTGOING prompt: while active, prompt() submits
-//     `ultracode <payload>` (the binary's per-turn Workflow opt-in). No re-spawn (no 2nd startEngine).
-//   - Selecting a real level (or `default`) DEACTIVATES ultracode (clears the flag + scratch keys) and
-//     applies that level.
+// The switch is driven with `/effort ultracode on|off` typed into the PTY, exactly as the `fast` option
+// drives `/fast on|off`: no re-spawn, no turn, deferred while a turn is in flight. It is independent of
+// the effort level — no xhigh is forced, an effort pick leaves it on — and no prompt is prefixed with a
+// keyword. `ultracode:true` is mirrored into the scratch `--settings` file only so a re-spawn keeps it;
+// the dead `ultracodeKeywordTrigger` key is never written. When the CLI answers with one of its two
+// refusals, the switch goes back off with the reason.
 //
-// Harness: the effort-apply real-`createSession`/`startEngine` seam (a single shared `writes[]` so the
-// live injects are observable) + an injected fake clock so prompt() can be driven deterministically (the
-// keyword-prefix is asserted on the OUTGOING PTY payload). The scratch-settings half (R3.2) is asserted
-// directly against `applyUltracodeSettings` on a real temp file (it preserves a pre-existing key).
+// Story 060's sentinel design is what these tests replaced; each "never" below is a behaviour it had.
+//
+// Harness: real createSession over a fake startEngine (one shared `writes[]`, so every inject is
+// observable, and an `emit` that plays terminal output into the PTY's onData listeners), an injected
+// fake clock, and a STUB model catalogue so nothing reads the host CLI.
 //   node --experimental-strip-types --test test/effort-ultracode-apply.test.ts   (build dist/ first)
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,12 +20,18 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ClaudeAcpAgent } from "../dist/acp-agent.js";
 import { applyUltracodeSettings } from "../dist/gate/settings-writer.js";
+import { stubModelCatalogSource } from "./helpers/stub-model-catalog.ts";
 
-/** A fake PTY that CAPTURES every `write` into the shared `writes` array (so each inject is observable). */
-function makeFakePty(writes: string[]) {
+type Listener = (chunk: string) => void;
+
+/** A fake PTY: captures every `write` and lets the test play terminal output to `onData` listeners. */
+function makeFakePty(writes: string[], listeners: Set<Listener>) {
   const pty = {
     onExit: () => ({ dispose() {} }),
-    onData: () => ({ dispose() {} }),
+    onData: (fn: Listener) => {
+      listeners.add(fn);
+      return { dispose: () => listeners.delete(fn) };
+    },
     resize: () => {},
     write: (d: string) => {
       writes.push(d);
@@ -38,16 +41,18 @@ function makeFakePty(writes: string[]) {
   return pty as never;
 }
 
-function makeClient() {
+function makeClient(updates: unknown[]) {
   return {
-    sessionUpdate: async () => {},
+    sessionUpdate: async (n: unknown) => {
+      updates.push(n);
+    },
     requestPermission: async () => ({ outcome: { outcome: "selected", optionId: "allow" } }),
     readTextFile: async () => ({ content: "" }),
     writeTextFile: async () => ({}),
   } as never;
 }
 
-/** Fake clock shared by sendPrompt (the \r delay) and the turn resolver (Δt + watchdog). */
+/** Fake clock shared by sendPrompt (the \r delay), the turn resolver and the reply-watch window. */
 function makeClock() {
   let now = 0;
   const timers: Array<{ at: number; fn: () => void; cancelled: boolean }> = [];
@@ -70,93 +75,87 @@ function makeClock() {
   return { schedule, advance };
 }
 
-/** startEngine seam: call 1 is the createSession spawn. Selecting effort/ultracode must NOT re-spawn
- *  (Option A), so any 2nd call is a regression. All PTYs share one `writes` array (injects observable).
- *  `effortLevel`/`agent`/`permissionMode` are captured so a re-spawn's flag values are assertable (the
- *  R1.2 re-spawn-while-active guard checks the sentinel never reaches `--effort`). */
 function makeStartEngine() {
-  const calls: Array<{
-    sessionId?: string;
-    resume?: boolean;
-    effortLevel?: string;
-    agent?: string;
-    permissionMode?: string;
-  }> = [];
+  const calls: Array<{ resume?: boolean; effortLevel?: string; agent?: string }> = [];
   const writes: string[] = [];
+  const listeners = new Set<Listener>();
   const startEngine = (args: {
     sessionId?: string;
     cwd: string;
     resume?: boolean;
     effortLevel?: string;
     agent?: string;
-    permissionMode?: string;
   }) => {
-    calls.push({
-      sessionId: args.sessionId,
-      resume: args.resume,
-      effortLevel: args.effortLevel,
-      agent: args.agent,
-      permissionMode: args.permissionMode,
-    });
+    calls.push({ resume: args.resume, effortLevel: args.effortLevel, agent: args.agent });
     return {
       sessionId: args.sessionId ?? "11111111-1111-4111-8111-111111111111",
-      pty: makeFakePty(writes),
+      pty: makeFakePty(writes, listeners),
       watcher: { stop: () => {}, notifyEndOfTurn: () => {} },
       cwd: args.cwd,
     };
   };
-  return { startEngine, calls, writes };
+  const emit = (chunk: string) => {
+    for (const fn of [...listeners]) fn(chunk);
+  };
+  return { startEngine, calls, writes, listeners, emit };
 }
 
+type OptionShape = { id: string; type?: string; currentValue?: unknown; description?: string };
 type SessionShape = {
-  configOptions: Array<{ id: string; currentValue?: unknown }>;
-  ultracodeActive?: boolean;
+  configOptions: OptionShape[];
+  ultracodeOn?: boolean;
   turnDetector?: { observe: (m: unknown) => void };
   interacted?: boolean;
+  gate?: { settingsPath?: string; teardown?: () => Promise<void>; isTorndown?: boolean };
 };
 
 async function newSession(
   t: Parameters<NonNullable<Parameters<typeof test>[0]>>[0],
   startEngine: unknown,
   schedule: unknown,
+  updates: unknown[] = [],
+  booleanCapable = true,
 ) {
-  const agent = new ClaudeAcpAgent(makeClient(), undefined, undefined, {
+  const agent = new ClaudeAcpAgent(makeClient(updates), undefined, undefined, {
     startEngine: startEngine as never,
     schedule: schedule as never,
+    modelCatalogSource: stubModelCatalogSource,
   });
   t.after(() => agent.dispose());
-  const response = await (
-    agent as unknown as {
-      createSession: (p: unknown) => Promise<{ sessionId: string }>;
-    }
-  ).createSession({ cwd: "/work/dir", mcpServers: [] });
-  const sessions = (
-    agent as unknown as {
-      sessions: Record<string, SessionShape>;
-    }
-  ).sessions;
-  return { agent, sessionId: response.sessionId, sessions };
+  const a = agent as unknown as {
+    initialize: (p: unknown) => Promise<unknown>;
+    createSession: (p: unknown) => Promise<{ sessionId: string }>;
+    sessions: Record<string, SessionShape>;
+  };
+  await a.initialize({
+    protocolVersion: 1,
+    clientCapabilities: booleanCapable ? { session: { configOptions: { boolean: {} } } } : {},
+  });
+  const response = await a.createSession({ cwd: "/work/dir", mcpServers: [] });
+  return { agent, sessionId: response.sessionId, sessions: a.sessions };
 }
 
-const setOption = (agent: ClaudeAcpAgent, sessionId: string, configId: string, value: string) =>
+const setOption = (agent: ClaudeAcpAgent, sessionId: string, configId: string, value: unknown) =>
   (
     agent as unknown as {
       setSessionConfigOption: (p: {
         sessionId: string;
         configId: string;
-        value: string;
+        value: unknown;
       }) => Promise<unknown>;
     }
   ).setSessionConfigOption({ sessionId, configId, value });
 
-const effortCurrentValue = (sessions: Record<string, SessionShape>, id: string) =>
-  sessions[id].configOptions.find((o) => o.id === "effort")?.currentValue;
+const option = (sessions: Record<string, SessionShape>, id: string, configId: string) =>
+  sessions[id].configOptions.find((o) => o.id === configId);
 
 const asst = (stop_reason: unknown, uuid: string) => ({
   type: "assistant",
   uuid,
   message: { stop_reason },
 });
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 /**
  * Drive a real single-line prompt through the agent and return the OUTGOING PTY payload (the body
@@ -190,259 +189,268 @@ async function sendOnce(
   return body;
 }
 
-test("R2.1/R2.2/R1.2 — selecting `ultracode` injects `/effort xhigh` (never `/effort ultracode`), sets currentValue=ultracode + ultracodeActive", async (t) => {
+test("84.3 toggling on types exactly `/effort ultracode on`, off types `/effort ultracode off` — no xhigh, no re-spawn", async (t) => {
   const fake = makeStartEngine();
   const clock = makeClock();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
-  await setOption(agent, sessionId, "model", "sonnet"); // surface the effort option (a /model inject)
-
-  // Make the ultracode→xhigh inject OBSERVABLE: the machine-seeded effort could already be xhigh (then
-  // the no-op guard would suppress the inject). Force a guaranteed non-xhigh real level FIRST.
   await setOption(agent, sessionId, "effort", "low");
-  assert.equal(effortCurrentValue(sessions, sessionId), "low", "precondition: effort is now low");
-  const callsBeforeUltracode = fake.calls.length;
-  fake.writes.length = 0; // drop the /model + /effort low writes — assert only the ultracode select below
-
-  await setOption(agent, sessionId, "effort", "ultracode");
-
-  const all = fake.writes.join("");
-  assert.equal(
-    fake.calls.length,
-    callsBeforeUltracode,
-    "selecting ultracode must NOT re-spawn (Option A: keyword + scratch, no new startEngine call)",
-  );
-  assert.match(
-    all,
-    /\/effort xhigh/,
-    `ultracode's effort component is xhigh, applied via the live /effort inject; got: ${JSON.stringify(all)}`,
-  );
-  assert.ok(
-    !all.includes("/effort ultracode"),
-    `R1.2: ultracode must NEVER be emitted as a /effort value; got: ${JSON.stringify(all)}`,
-  );
-  assert.equal(
-    effortCurrentValue(sessions, sessionId),
-    "ultracode",
-    "the effort configOption currentValue stays the `ultracode` sentinel (optimistic commit)",
-  );
-  assert.equal(
-    sessions[sessionId].ultracodeActive,
-    true,
-    "the per-session ultracodeActive flag is set",
-  );
-});
-
-test("R2.2 — while ultracode is active the OUTGOING prompt is prefixed with the `ultracode` keyword; inactive → no prefix", async (t) => {
-  const fake = makeStartEngine();
-  const clock = makeClock();
-  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
-  await setOption(agent, sessionId, "model", "sonnet");
-
-  // (a) BEFORE selecting ultracode: a plain prompt carries NO keyword prefix.
-  const inactiveBody = await sendOnce(
-    agent,
-    sessionId,
-    sessions,
-    fake.writes,
-    clock.advance,
-    "hello world",
-    "u-inactive",
-  );
-  assert.ok(
-    !inactiveBody.startsWith("ultracode "),
-    `with ultracode inactive the outgoing payload must NOT be keyword-prefixed; got: ${JSON.stringify(inactiveBody)}`,
-  );
-  assert.ok(inactiveBody.includes("hello world"), "the inactive payload still carries the user text");
-
-  // (b) AFTER selecting ultracode: the outgoing payload STARTS WITH the keyword opt-in.
-  await setOption(agent, sessionId, "effort", "ultracode");
-  const activeBody = await sendOnce(
-    agent,
-    sessionId,
-    sessions,
-    fake.writes,
-    clock.advance,
-    "hello world",
-    "u-active",
-  );
-  assert.ok(
-    activeBody.startsWith("ultracode "),
-    `with ultracode active the outgoing payload MUST start with the "ultracode " keyword; got: ${JSON.stringify(activeBody)}`,
-  );
-  assert.ok(
-    activeBody.includes("hello world"),
-    "the user text rides AFTER the keyword prefix (the prefix is additive, not a replacement)",
-  );
-});
-
-test("R2.3 — selecting a real level after ultracode injects that level, clears ultracodeActive, drops the keyword prefix", async (t) => {
-  const fake = makeStartEngine();
-  const clock = makeClock();
-  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
-  await setOption(agent, sessionId, "model", "sonnet");
-  // Seed a non-high level so the later `/effort high` deselect inject is observable, then activate.
-  await setOption(agent, sessionId, "effort", "low");
-  await setOption(agent, sessionId, "effort", "ultracode");
-  assert.equal(sessions[sessionId].ultracodeActive, true, "precondition: ultracode active");
+  const callsBefore = fake.calls.length;
   fake.writes.length = 0;
 
-  await setOption(agent, sessionId, "effort", "high"); // deselect ultracode → a real level
+  await setOption(agent, sessionId, "ultracode", true);
+  const on = fake.writes.join("");
+  assert.match(on, /\/effort ultracode on/);
+  assert.ok(!/\/effort xhigh/.test(on), `Ultracode no longer forces xhigh; got ${JSON.stringify(on)}`);
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true);
+  assert.equal(option(sessions, sessionId, "effort")?.currentValue, "low", "effort is left alone");
+  assert.equal(sessions[sessionId].ultracodeOn, true);
 
-  const all = fake.writes.join("");
-  assert.match(
-    all,
-    /\/effort high/,
-    `deselecting to a real level injects that level live; got: ${JSON.stringify(all)}`,
-  );
-  assert.equal(
-    sessions[sessionId].ultracodeActive,
-    false,
-    "selecting a real level clears the ultracodeActive flag",
-  );
-  assert.equal(
-    effortCurrentValue(sessions, sessionId),
-    "high",
-    "the effort currentValue now reflects the real level",
-  );
-
-  // A subsequent prompt must carry NO keyword prefix now that ultracode is deselected.
-  const body = await sendOnce(
-    agent,
-    sessionId,
-    sessions,
-    fake.writes,
-    clock.advance,
-    "post deselect",
-    "u-after",
-  );
-  assert.ok(
-    !body.startsWith("ultracode "),
-    `after deselecting ultracode the outgoing payload must NOT be keyword-prefixed; got: ${JSON.stringify(body)}`,
-  );
+  fake.writes.length = 0;
+  await setOption(agent, sessionId, "ultracode", false);
+  assert.match(fake.writes.join(""), /\/effort ultracode off/);
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, false);
+  assert.equal(fake.calls.length, callsBefore, "neither direction re-spawns");
 });
 
-test("R1.2 (re-spawn-while-active) — an agent/mode re-spawn while ultracode is active passes `--effort xhigh` to the spawn, NEVER the `ultracode` sentinel", async (t) => {
+test("84.3 the select fallback's on/off strings drive the same commands", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule, [], false);
+  assert.equal(option(sessions, sessionId, "ultracode")?.type, "select", "precondition: no boolean capability");
+  fake.writes.length = 0;
+  await setOption(agent, sessionId, "ultracode", "on");
+  assert.match(fake.writes.join(""), /\/effort ultracode on/);
+  assert.equal(sessions[sessionId].ultracodeOn, true);
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, "on");
+});
+
+test("84.3 a repeated toggle sends nothing", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "ultracode", true);
+  fake.writes.length = 0;
+  await setOption(agent, sessionId, "ultracode", true);
+  assert.equal(fake.writes.join(""), "");
+});
+
+test("84.4 an effort pick while on types only the level and leaves Ultracode on", async (t) => {
   const fake = makeStartEngine();
   const clock = makeClock();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
-  await setOption(agent, sessionId, "model", "sonnet"); // surface the effort option
-  await setOption(agent, sessionId, "effort", "ultracode"); // activate → currentValue stays the sentinel
-  assert.equal(sessions[sessionId].ultracodeActive, true, "precondition: ultracode active");
-  assert.equal(
-    effortCurrentValue(sessions, sessionId),
-    "ultracode",
-    "precondition: the effort configOption currentValue is the `ultracode` sentinel (optimistic commit)",
-  );
-  const callsBefore = fake.calls.length;
+  await setOption(agent, sessionId, "ultracode", true);
+  fake.writes.length = 0;
 
-  // applyAgentChange (and the dontAsk/bypass driveModeIntoTui path) re-spawn WITHOUT threading
-  // change.effortLevel, so respawnSession preserves the current effort via currentEffort(session) — which
-  // is the `ultracode` SENTINEL while active. The seam MUST map it to its real effort component (xhigh):
-  // the binary rejects `--effort ultracode` (story-060 probe → "Unknown --effort value 'ultracode'"),
-  // silently degrading effort to default. The scratch `ultracode:true` already carries the orchestration
-  // activation at spawn, so xhigh is the correct flag value. Driving respawnSession({agent}) directly
-  // models exactly what applyAgentChange does after its no-op guard.
-  await (
-    agent as unknown as {
-      respawnSession: (
-        sid: string,
-        session: unknown,
-        change: { agent?: string; permissionMode?: string; effortLevel?: string },
-      ) => Promise<void>;
-    }
-  ).respawnSession(sessionId, sessions[sessionId], { agent: "code-reviewer" });
+  await setOption(agent, sessionId, "effort", "high");
+  const all = fake.writes.join("");
+  assert.match(all, /\/effort high/);
+  assert.ok(!/ultracode/.test(all), `an effort pick must not touch Ultracode; got ${JSON.stringify(all)}`);
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true);
+});
 
-  const respawn = fake.calls[fake.calls.length - 1];
-  assert.equal(
-    fake.calls.length,
-    callsBefore + 1,
-    "the agent change triggers exactly one re-spawn (a new startEngine call)",
-  );
-  assert.equal(respawn.agent, "code-reviewer", "the re-spawn carries the new agent persona");
+test("84.5 prompts go out as typed — no `ultracode` keyword prefix, on or off", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "ultracode", true);
+  const body = await sendOnce(agent, sessionId, sessions, fake.writes, clock.advance, "hello", "u-1");
+  assert.ok(body.includes("hello"));
+  assert.ok(!body.startsWith("ultracode"), `no keyword prefix; got ${JSON.stringify(body)}`);
+});
+
+test("84.6 a toggle during a turn is deferred, then typed once the turn settles", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  fake.writes.length = 0;
+  const p = (agent as unknown as { prompt: (r: unknown) => Promise<unknown> }).prompt({
+    sessionId,
+    prompt: [{ type: "text", text: "long task" }],
+  });
+  await Promise.resolve();
+  clock.advance(120);
+
+  await setOption(agent, sessionId, "ultracode", true);
   assert.ok(
-    respawn.effortLevel !== "ultracode",
-    `R1.2: the spawn must NEVER receive the ultracode sentinel as --effort (the binary rejects it); got: ${JSON.stringify(respawn.effortLevel)}`,
+    !fake.writes.join("").includes("/effort ultracode"),
+    "nothing is typed into the terminal while the turn runs",
   );
-  assert.equal(
-    respawn.effortLevel,
-    "xhigh",
-    "the preserved ultracode effort maps to its real component (xhigh) at the spawn seam",
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true, "the switch shows the intent");
+
+  sessions[sessionId].turnDetector?.observe(asst("end_turn", "u-turn"));
+  clock.advance(200);
+  await p;
+  assert.match(fake.writes.join(""), /\/effort ultracode on/, "flushed after the turn");
+});
+
+test("84.7 a model switch keeps the intent: hidden on a model without xhigh, back on when switching back", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "ultracode", true);
+
+  fake.writes.length = 0;
+  await setOption(agent, sessionId, "model", "lowcap");
+  assert.equal(option(sessions, sessionId, "ultracode"), undefined, "hidden on lowcap");
+  assert.equal(sessions[sessionId].ultracodeOn, true, "the intent survives");
+
+  await setOption(agent, sessionId, "model", "sonnet");
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true, "back, still on");
+  assert.ok(
+    !fake.writes.join("").includes("/effort ultracode"),
+    "a model switch types no Ultracode command — the CLI keeps the request itself",
   );
 });
 
-test("R3.2 — applyUltracodeSettings(active=true) writes ultracode + ultracodeKeywordTrigger and PRESERVES a pre-existing key; (active=false) removes BOTH, keeps the pre-existing key", async (t) => {
+test("84.8 the CLI's workflows refusal turns the switch back off, with the reason, and tells the client", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const updates: Array<{ update?: { sessionUpdate?: string; configOptions?: OptionShape[] } }> = [];
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule, updates as never);
+  await setOption(agent, sessionId, "ultracode", true);
+  updates.length = 0;
+
+  fake.emit("\x1b[2K  \u23bf  Ultracode needs dynamic workflows enabled (see /config). Valid options are: low");
+  await flush();
+
+  const ultracode = option(sessions, sessionId, "ultracode");
+  assert.equal(ultracode?.currentValue, false, "switched back off");
+  assert.match(ultracode?.description ?? "", /Off: Ultracode needs dynamic workflows enabled/);
+  assert.equal(sessions[sessionId].ultracodeOn, false);
+  const pushed = updates.find((u) => u.update?.sessionUpdate === "config_option_update");
+  assert.ok(pushed, "a config_option_update reaches the client");
+  assert.equal(
+    pushed!.update!.configOptions!.find((o) => o.id === "ultracode")?.currentValue,
+    false,
+  );
+  assert.equal(fake.listeners.size, 0, "the reply watch is gone once answered");
+
+  // A model switch does not clear a workflows refusal: it is not about the model.
+  await setOption(agent, sessionId, "model", "sonnet");
+  assert.match(option(sessions, sessionId, "ultracode")?.description ?? "", /Off:/);
+});
+
+test("84.8 the per-model refusal is cleared by a model switch; a retry clears it too", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "ultracode", true);
+  fake.emit("Ultracode\x1b[1Cisn't available on claude-opus-4-6. Valid options are: low, medium, high");
+  await flush();
+  assert.match(
+    option(sessions, sessionId, "ultracode")?.description ?? "",
+    /Off: Ultracode isn't available on claude-opus-4-6\./,
+  );
+
+  await setOption(agent, sessionId, "model", "sonnet");
+  assert.ok(!/Off:/.test(option(sessions, sessionId, "ultracode")?.description ?? ""));
+
+  await setOption(agent, sessionId, "model", "default");
+  await setOption(agent, sessionId, "ultracode", true);
+  fake.emit("Ultracode isn't available on claude-opus-4-6.");
+  await flush();
+  await setOption(agent, sessionId, "ultracode", true);
+  assert.ok(!/Off:/.test(option(sessions, sessionId, "ultracode")?.description ?? ""), "retry clears it");
+});
+
+test("84.8 a confirmation, or silence past the window, ends the watch without changing anything", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+
+  await setOption(agent, sessionId, "ultracode", true);
+  fake.emit("Ultracode on (this session only): dynamic workflows on every task. Effort stays high.");
+  await flush();
+  assert.equal(fake.listeners.size, 0);
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true);
+
+  await setOption(agent, sessionId, "ultracode", false);
+  await setOption(agent, sessionId, "ultracode", true);
+  assert.equal(fake.listeners.size, 1, "a new watch per `on`");
+  clock.advance(6000);
+  assert.equal(fake.listeners.size, 0, "the window closed");
+  fake.emit("Ultracode needs dynamic workflows enabled (see /config).");
+  await flush();
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true, "a late line is ignored");
+});
+
+test("84.9 a re-spawn while on carries the real effort, and the scratch settings carry Ultracode", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fork-ultracode-respawn-"));
+  t.after(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const scratch = path.join(dir, "settings.local.json");
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  // Only the scratch path matters here; the rest of the gate is inert (no hook server in this test).
+  sessions[sessionId].gate = { settingsPath: scratch, teardown: async () => {}, isTorndown: true };
+  await setOption(agent, sessionId, "effort", "high");
+  await setOption(agent, sessionId, "ultracode", true);
+  const written = JSON.parse(await fs.readFile(scratch, "utf8")) as Record<string, unknown>;
+  assert.equal(written.ultracode, true, "mirrored for a re-spawn");
+  assert.ok(!("ultracodeKeywordTrigger" in written), "the dead key is never written");
+
+  await (
+    agent as unknown as {
+      respawnSession: (sid: string, s: unknown, c: { agent?: string }) => Promise<void>;
+    }
+  ).respawnSession(sessionId, sessions[sessionId], { agent: "code-reviewer" });
+  assert.equal(fake.calls[fake.calls.length - 1].effortLevel, "high", "no xhigh coercion");
+
+  await setOption(agent, sessionId, "ultracode", false);
+  const after = JSON.parse(await fs.readFile(scratch, "utf8")) as Record<string, unknown>;
+  assert.ok(!("ultracode" in after), "removed when switched off");
+});
+
+test("84.10 applyUltracodeSettings sets/removes only `ultracode` and preserves every other key", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fork-ultracode-settings-"));
   const file = path.join(dir, "settings.local.json");
   t.after(async () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
-
-  // Seed the scratch with a pre-existing key (a stand-in for the gate hook block) that MUST survive.
-  const seed = { hooks: { PreToolUse: [{ matcher: "*", hooks: [{ type: "http", url: "http://x/__fork-acp-gate__" }] }] } };
+  const seed = {
+    hooks: { PreToolUse: [{ matcher: "*", hooks: [{ type: "http", url: "http://x/__fork-acp-gate__" }] }] },
+  };
   await fs.writeFile(file, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
 
-  // active=true → set BOTH keys, preserve the prior block.
   await applyUltracodeSettings(file, true);
-  const afterOn = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-  assert.equal(afterOn.ultracode, true, "active=true sets ultracode:true");
-  assert.equal(
-    afterOn.ultracodeKeywordTrigger,
-    true,
-    "active=true sets ultracodeKeywordTrigger:true (defensively enables the keyword)",
-  );
-  assert.deepEqual(
-    afterOn.hooks,
-    seed.hooks,
-    "the pre-existing hooks block is preserved verbatim (the gate hook is never clobbered)",
-  );
+  const on = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(on).sort(), ["hooks", "ultracode"]);
+  assert.equal(on.ultracode, true);
+  assert.deepEqual(on.hooks, seed.hooks);
 
-  // active=false → remove BOTH ultracode keys, keep the prior block.
   await applyUltracodeSettings(file, false);
-  const afterOff = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-  assert.ok(!("ultracode" in afterOff), "active=false removes the ultracode key");
-  assert.ok(
-    !("ultracodeKeywordTrigger" in afterOff),
-    "active=false removes the ultracodeKeywordTrigger key",
-  );
-  assert.deepEqual(
-    afterOff.hooks,
-    seed.hooks,
-    "the pre-existing hooks block still survives the deselect rewrite",
-  );
+  const off = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
+  assert.deepEqual(off, seed);
 });
 
-test("R3.2 — applyUltracodeSettings is absence-safe: a missing file is treated as `{}` and creates one with the keys (active=true), or a no-op-equivalent `{}` (active=false)", async (t) => {
+test("84.10 applyUltracodeSettings is absence-safe", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fork-ultracode-absent-"));
-  const file = path.join(dir, "settings.local.json"); // deliberately NOT created
+  const file = path.join(dir, "settings.local.json");
   t.after(async () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
-
-  // active=true on an absent file must not throw — it creates the file with just the two keys.
   await applyUltracodeSettings(file, true);
-  const created = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-  assert.equal(created.ultracode, true, "absent → created with ultracode:true");
-  assert.equal(created.ultracodeKeywordTrigger, true, "absent → created with ultracodeKeywordTrigger:true");
-
-  // active=false then removes them, leaving an empty object (no residue keys).
+  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), { ultracode: true });
   await applyUltracodeSettings(file, false);
-  const emptied = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-  assert.ok(!("ultracode" in emptied), "deselect removes ultracode");
-  assert.ok(!("ultracodeKeywordTrigger" in emptied), "deselect removes ultracodeKeywordTrigger");
+  assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), {});
 });
 
-test("billing seam — the ultracode apply + keyword path introduces no -p/--print/stream-json token", async (t) => {
+test("84 the legacy `ultracode` effort value is rejected — it is no longer an effort level", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId } = await newSession(t, fake.startEngine, clock.schedule);
+  await assert.rejects(setOption(agent, sessionId, "effort", "ultracode"), /Invalid value/);
+});
+
+test("billing seam — the Ultracode path introduces no -p/--print/stream-json token", async (t) => {
   const fake = makeStartEngine();
   const clock = makeClock();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
-  await setOption(agent, sessionId, "model", "sonnet");
-  await setOption(agent, sessionId, "effort", "low"); // ensure the ultracode→xhigh inject fires
-  await setOption(agent, sessionId, "effort", "ultracode");
-  // also drive a prompt so the keyword-prefixed outgoing payload is included in the writes sweep
+  await setOption(agent, sessionId, "ultracode", true);
   await sendOnce(agent, sessionId, sessions, fake.writes, clock.advance, "do work", "u-bill");
+  await setOption(agent, sessionId, "ultracode", false);
   const all = fake.writes.join("");
-  assert.ok(
-    !/--print|stream-json|(^|\s)-p(\s|$)/.test(all),
-    `the ultracode apply/keyword path must carry no credit token: ${JSON.stringify(all)}`,
-  );
+  assert.ok(!/--print|stream-json|(^|\s)-p(\s|$)/.test(all), JSON.stringify(all));
 });

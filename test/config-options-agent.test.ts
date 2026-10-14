@@ -78,7 +78,7 @@ const TWO_PERSONAS: FakeAgentEntry[] = [
   { value: "planner", displayName: "Planner", description: "Plans the work" },
 ];
 
-test("3.2 ≥1 discovered persona → `agent` is the 4th option, sentinel-first, currentValue 'default' (R3.2)", async (t) => {
+test("3.2 ≥1 discovered persona → `agent` follows mode/model/effort/ultracode, sentinel-first, currentValue 'default' (R3.2)", async (t) => {
   const agent = makeAgent(TWO_PERSONAS);
   t.after(() => agent.dispose());
   const sessionId = await freshSession(agent);
@@ -86,12 +86,13 @@ test("3.2 ≥1 discovered persona → `agent` is the 4th option, sentinel-first,
   const opts = configOptions(agent, sessionId);
   const ids = opts.map((o) => o.id);
 
-  // It must be PRESENT and be the 4th option (after mode, model, effort). The fork seeds `default`,
-  // which now advertises effort (v0.52 parity), so all four are present in order.
+  // It must be PRESENT and come last (after mode, model, effort). The fork seeds `default`, which
+  // advertises effort (v0.52 parity) including xhigh, so the Ultracode switch (item 84) sits right
+  // after effort and all five are present in order.
   assert.deepEqual(
     ids,
-    ["mode", "model", "effort", "agent"],
-    `agent must be the 4th configOption after mode/model/effort, got: ${ids.join(", ")}`,
+    ["mode", "model", "effort", "ultracode", "agent"],
+    `agent must come after mode/model/effort/ultracode, got: ${ids.join(", ")}`,
   );
 
   const agentOpt = opts.find((o) => o.id === "agent");
