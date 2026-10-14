@@ -67,11 +67,80 @@ export function resetLiveModelCatalogCache(): void {
 }
 
 /**
+ * Environment variable that selects where the default source reads from.
+ * `builtin` serves {@link MODEL_CATALOG} without spawning anything — an offline
+ * knob for production, and what the test harness sets on every adapter it spawns
+ * as a child process. Unset (or any other value) means the live CLI read.
+ */
+export const MODEL_CATALOG_ENV = "CLAUDE_TUI_MODEL_CATALOG";
+
+/**
+ * Opt-in for a test that genuinely needs the live CLI read. Without it, the live
+ * source refuses to run under the node test runner — see {@link LiveCatalogInTestsError}.
+ */
+export const LIVE_CATALOG_TESTS_ENV = "CLAUDE_TUI_LIVE_CATALOG_TESTS";
+
+/**
+ * Raised when the LIVE source is reached from inside `node --test` without the
+ * {@link LIVE_CATALOG_TESTS_ENV} opt-in.
+ *
+ * WHY IT EXISTS. Each test file runs in its own process with an empty cache, and
+ * most suites create sessions without injecting a catalogue. Before this guard,
+ * one `npm run test:fork` spawned ~50 real CLI sessions — each loading the
+ * user's hooks, plugins and MCP servers — and five runs made 248 SDK sessions in
+ * 17 minutes (measured 2026-10-14). The test setup module installs a stub as the
+ * default source; this error is the tripwire for anything that bypasses it.
+ *
+ * {@link resolveModelCatalog} rethrows it instead of falling back, so the test
+ * that reached the live read FAILS rather than passing on the built-in list.
+ * `NODE_TEST_CONTEXT` is set only by node's test runner, so production never
+ * sees this.
+ */
+export class LiveCatalogInTestsError extends Error {
+  constructor() {
+    super(
+      "the live model catalogue (a real `claude` spawn) was requested under the node test runner. " +
+        "Run tests through `npm run test:fork` (it preloads test/helpers/test-setup.ts, which installs " +
+        "the stub), inject `deps.modelCatalogSource`, or opt in with " +
+        `${LIVE_CATALOG_TESTS_ENV}=1 for a test that truly needs the CLI.`,
+    );
+    this.name = "LiveCatalogInTestsError";
+  }
+}
+
+/** Throws {@link LiveCatalogInTestsError} under `node --test` unless the live opt-in is set. */
+export function assertLiveCatalogAllowed(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_TEST_CONTEXT && env[LIVE_CATALOG_TESTS_ENV] !== "1") {
+    throw new LiveCatalogInTestsError();
+  }
+}
+
+/** Set by {@link setDefaultModelCatalogSource}; `undefined` means the live CLI read. */
+let defaultOverride: SupportedModelsSource | undefined;
+
+/**
+ * Replace the source used when a caller passes none. Only the test setup module
+ * calls this (test/helpers/test-setup.ts, preloaded by `npm run test:fork`), so
+ * every session a test creates reads a fixed catalogue instead of the host CLI.
+ * Pass `undefined` to restore the live read. Production never calls it.
+ */
+export function setDefaultModelCatalogSource(source: SupportedModelsSource | undefined): void {
+  defaultOverride = source;
+  cache = null;
+}
+
+/** The source a caller without its own gets: the test override, or the live read. */
+function defaultSource(): Promise<ModelInfo[]> {
+  return defaultOverride ? defaultOverride() : liveSource();
+}
+
+/**
  * The production source: spawn the PATH `claude` through the SDK purely to read
  * its model list, then shut it down. `supportedModels()` is a control request,
  * not a turn — it sends no prompt and consumes no quota.
  */
-async function defaultSource(): Promise<ModelInfo[]> {
+async function liveSource(): Promise<ModelInfo[]> {
+  assertLiveCatalogAllowed();
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   const q = query({
     prompt: "",
@@ -152,12 +221,15 @@ export function nameDefaultRow(models: ModelInfo[]): ModelInfo[] {
  * for the rest of the process.
  *
  * @param logger - Where a fallback is reported. Optional, for library callers.
- * @param source - Test seam; defaults to spawning the PATH `claude`.
+ * @param source - Test seam; defaults to spawning the PATH `claude` (see {@link defaultSource}).
  */
 export async function resolveModelCatalog(
   logger?: CatalogLogger,
   source: SupportedModelsSource = defaultSource,
 ): Promise<ModelInfo[]> {
+  // The offline knob: the built-in list, served as-is, with nothing spawned.
+  if (source === defaultSource && !defaultOverride && process.env[MODEL_CATALOG_ENV] === "builtin")
+    return MODEL_CATALOG;
   // Keyed by source, so an injected catalogue never answers for the CLI and vice versa (item 93).
   if (cache && cache.source === source && Date.now() - cache.at < CATALOG_TTL_MS)
     return cache.models;
@@ -174,6 +246,8 @@ export async function resolveModelCatalog(
     cache = { models: resolved, at: Date.now(), source };
     return resolved;
   } catch (error) {
+    // The test tripwire must fail the test that reached it, not degrade quietly.
+    if (error instanceof LiveCatalogInTestsError) throw error;
     // `log`, NOT `error`, and ONCE per process. Both halves are deliberate.
     //
     // Level: this path is degraded-but-recovered — the picker still works, from
