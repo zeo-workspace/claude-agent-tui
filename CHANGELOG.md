@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.16.0](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.15.1...v0.16.0) (2026-10-14)
+
+
+### Added
+
+* **deps:** bump claude-agent-sdk to 0.3.296 and the ACP SDK to 1.8.0 ([1985830](https://github.com/zeo-workspace/claude-agent-tui/commit/19858308ea9d0fc5848e344be30f8f4e05f366e6))
+
+
+### Fixed
+
+* **replay:** hide inter-agent meta messages and replay history hidden by a compaction ([634d541](https://github.com/zeo-workspace/claude-agent-tui/commit/634d5414251a7c2e502717e5a7176bacf8c1333a))
+
+
+### Infrastructure
+
+* **deps:** bump @babel/runtime from 7.29.7 to 7.29.10 ([bb71409](https://github.com/zeo-workspace/claude-agent-tui/commit/bb71409a474be96513b55fc7d4ce20222ff0268d))
+* **deps:** bump actions/setup-node from 7.0.0 to 7.1.0 ([b512446](https://github.com/zeo-workspace/claude-agent-tui/commit/b51244601c262967526e3e4eaa10324111d8a57d))
+* **deps:** bump actions/upload-artifact from 7.0.1 to 7.0.2 ([7fc2c18](https://github.com/zeo-workspace/claude-agent-tui/commit/7fc2c18bcbc2ba00178e421379dc602d9bf69d5d))
+* **deps:** bump anchore/sbom-action from 0.24.2 to 0.24.3 ([3cc2c9d](https://github.com/zeo-workspace/claude-agent-tui/commit/3cc2c9d9f5af30ee7e8e0b019f5a49732bfded8a))
+* **deps:** bump github/codeql-action/upload-sarif ([a1aae2b](https://github.com/zeo-workspace/claude-agent-tui/commit/a1aae2b1af62a692c9534142064e2cdfc4e956d3))
+* **deps:** bump the minor dependency group and skip mcp_tool_listing blocks ([1ad83af](https://github.com/zeo-workspace/claude-agent-tui/commit/1ad83af1650d1c41bbbe4d8aa3ec704a5de0fbd1))
+* **deps:** bump trufflesecurity/trufflehog from 3.97.5 to 3.99.0 ([0c97036](https://github.com/zeo-workspace/claude-agent-tui/commit/0c9703649de484b4aebbd12b05a0b5ba45c9c97b))
+* **trufflehog:** move the scanner version with the action pin ([4b22196](https://github.com/zeo-workspace/claude-agent-tui/commit/4b2219666c64fd2f63aea97ccdc97abf9cb0a140))
+
 ## [0.15.1](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.15.0...v0.15.1) (2026-10-14)
 
 
