@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.15.1](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.15.0...v0.15.1) (2026-10-14)
+
+
+### Fixed
+
+* **bash:** keep a backgrounded terminal running and report the real exit code ([1e6e328](https://github.com/zeo-workspace/claude-agent-tui/commit/1e6e3285856db1962f04e6c59a311cb548f2b33f))
+* **load:** restore the permission mode a loaded thread was last in ([cbe7e30](https://github.com/zeo-workspace/claude-agent-tui/commit/cbe7e30638a3d9317b8dff034932b70cb85e7faf))
+
+
+### Infrastructure
+
+* **dependabot:** re-register version updates after the org transfer ([f8e1b52](https://github.com/zeo-workspace/claude-agent-tui/commit/f8e1b52f2af8d1966a3f6af11eff49ae5fcdd9f5))
+
 ## [0.15.0](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.13...v0.15.0) (2026-10-14)
 
 
