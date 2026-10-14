@@ -72,6 +72,12 @@ export interface DiffEnrichedReaderOptions {
    * unreadable transcript for the R1.3 fallback) without touching the filesystem.
    */
   readRawLines?: (path: string) => string[];
+  /**
+   * Item 92 (upstream #1312): handed the raw lines of every successful read, so a caller can derive
+   * more from the same read (the agent indexes ended background tasks) without reading the transcript
+   * twice. Not called when the transcript cannot be located or read.
+   */
+  onRawLines?: (sessionId: string, lines: string[]) => void;
 }
 
 /**
@@ -115,6 +121,8 @@ export function createDiffEnrichedReader(
     } catch {
       return reduced;
     }
+
+    opts.onRawLines?.(sessionId, raw);
 
     const map = toolUseResultMap(raw);
     if (map.size === 0) return reduced; // nothing to hydrate → reduced unchanged

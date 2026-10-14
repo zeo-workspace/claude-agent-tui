@@ -98,6 +98,7 @@ import { resolveWatchTarget } from "./jsonl.js";
 import type { LocateOptions } from "./jsonl.js";
 import { linearizeTurns, readOrderedMessages, defaultGetMessages } from "./linearize.js";
 import { createDiffEnrichedReader } from "./diff-enriched-reader.js";
+import { backgroundTaskEnds, type BackgroundTaskEnd } from "./background-task-end.js";
 import type { DiffEnrichedReaderOptions } from "./diff-enriched-reader.js";
 import {
   sourceSubagentRows,
@@ -237,6 +238,19 @@ type Session = {
    * was surfaced in an earlier pump). Per-session — sub-agent row uuids are session-scoped.
    */
   emittedNested: Set<string>;
+  /**
+   * Item 92 (upstream #1312) — ended background tasks, keyed by the `tool_use_id` of the Bash call that
+   * started them, re-derived from the raw transcript on every read (`backgroundTaskEnds`). Absent when
+   * the raw transcript is not read (`liveDiff` off), which is also when no result is known to be
+   * backgrounded.
+   */
+  backgroundTaskEnds?: Map<string, BackgroundTaskEnd>;
+  /**
+   * Item 92 — terminals of backgrounded commands whose exit the live pump held back at the tool result
+   * because the command was still running; {@link ClaudeAcpAgent.flushBackgroundExits} sends each exit
+   * once the task's notification reaches the transcript.
+   */
+  heldBackgroundExits?: Set<string>;
   /**
    * Story 056 (#812) — the last session title pushed to the client via `session_info_update` at the
    * story-024 turn boundary. Used to DEDUP: `emitSessionTitleUpdate` skips the push when the freshly
@@ -1135,7 +1149,7 @@ export type ToolUpdateMeta = {
   };
   terminal_exit?: {
     terminal_id: string;
-    exit_code: number;
+    exit_code: number | null;
     signal: string | null;
   };
 };
@@ -1650,7 +1664,15 @@ export class ClaudeAcpAgent implements Agent {
     // (index.ts) is what defaults it ON. OFF → byte-for-byte the pre-043 reduced reader (R5.1).
     this.getMessages =
       (deps.liveDiff ?? false)
-        ? createDiffEnrichedReader(deps.getMessages ?? defaultGetMessages, deps.diffEnrichOptions)
+        ? createDiffEnrichedReader(deps.getMessages ?? defaultGetMessages, {
+            ...deps.diffEnrichOptions,
+            // Item 92 (#1312): the same raw read yields the ended background tasks, so a held terminal
+            // exit costs no second read of the transcript.
+            onRawLines: (sid, lines) => {
+              const session = this.sessions[sid];
+              if (session) session.backgroundTaskEnds = backgroundTaskEnds(lines);
+            },
+          })
         : deps.getMessages;
     this.listSubagents = deps.listSubagents ?? defaultListSubagents;
     this.getSubagentMessages = deps.getSubagentMessages ?? defaultGetSubagentMessages;
@@ -3032,6 +3054,7 @@ export class ClaudeAcpAgent implements Agent {
     sessionId: string,
     turn: { message: unknown },
     toolUseCache: ToolUseCache,
+    live: boolean = false,
   ): Promise<void> {
     const session = this.sessions[sessionId];
     const source = turn.message as { message?: { role?: string; content?: unknown } };
@@ -3062,6 +3085,12 @@ export class ClaudeAcpAgent implements Agent {
         cwd: session?.cwd,
         taskState: session?.taskState,
         toolUseResult: turnToolUseResult,
+        // Item 92 (#1312): only the live pump can send a backgrounded command's exit later, so only
+        // it holds the exit back; replay exits at the result.
+        background: {
+          ended: (id) => session?.backgroundTaskEnds?.get(id),
+          held: live && session ? (session.heldBackgroundExits ??= new Set()) : undefined,
+        },
       },
     )) {
       await this.client.sessionUpdate(notification);
@@ -3406,7 +3435,8 @@ export class ClaudeAcpAgent implements Agent {
     // The merge MUST NOT reach the detector / §10 guard / §9 gate above — those already consumed the
     // un-merged `messages` slice exactly-once (R4.1 structural: sub-agent rows never advance
     // `detectorCursor` nor register as gate tool_uses).
-    await this.emitLinearizedWithNested(sessionId, session, messages);
+    await this.emitLinearizedWithNested(sessionId, session, messages, true);
+    await this.flushBackgroundExits(sessionId, session);
 
     // === SEAM(054) — feed the gate correlator from the sidechain rows (R3). Gated + LIVE-ONLY: runs
     // only with a present, non-torndown gate, and NEVER inside the shared emitLinearizedWithNested that
@@ -3455,6 +3485,7 @@ export class ClaudeAcpAgent implements Agent {
               sessionId,
               session,
               session.lastMessages ?? messages,
+              true,
             );
           },
         });
@@ -3466,6 +3497,32 @@ export class ClaudeAcpAgent implements Agent {
           session.subagentWatcher = undefined;
         }
       }
+    }
+  }
+
+  /**
+   * Item 92 (upstream #1312) — send the terminal exit of each backgrounded command whose task has now
+   * ended. The live pump held that exit back at the tool result (the command was still running); the
+   * task's `<task-notification>` in the raw transcript is its end, and its summary the code. Each held
+   * exit is sent once. Live-only: replay never holds an exit, so it has nothing to flush.
+   */
+  private async flushBackgroundExits(sessionId: string, session: Session): Promise<void> {
+    const held = session.heldBackgroundExits;
+    if (!held?.size) return;
+    for (const terminalId of [...held]) {
+      const end = session.backgroundTaskEnds?.get(terminalId);
+      if (!end) continue;
+      held.delete(terminalId);
+      await this.client.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: terminalId,
+          _meta: {
+            terminal_exit: { terminal_id: terminalId, exit_code: end.exitCode, signal: null },
+          } satisfies ToolUpdateMeta,
+        },
+      });
     }
   }
 
@@ -3495,6 +3552,7 @@ export class ClaudeAcpAgent implements Agent {
     sessionId: string,
     session: Session,
     messages: SessionMessage[],
+    live: boolean = false,
   ): Promise<void> {
     const subagentRows = await sourceSubagentRows(sessionId, messages, {
       dir: session.cwd,
@@ -3509,7 +3567,7 @@ export class ClaudeAcpAgent implements Agent {
       // so live and loaded render byte-for-byte the same (story 026 R3.3; story 038 moved usage_update
       // into the shared emit).
       if (!(turn.uuid && session.emitted.has(turn.uuid))) {
-        await this.emitTurnUpdates(sessionId, turn, session.toolUseCache);
+        await this.emitTurnUpdates(sessionId, turn, session.toolUseCache, live);
         if (turn.uuid) session.emitted.add(turn.uuid);
       }
 
@@ -4504,6 +4562,13 @@ export function toAcpNotifications(
     // text (which carries <system-reminder> blocks, abort/truncation suffixes, and the Agent/Task
     // agentId+usage trailer).
     toolUseResult?: unknown;
+    // Item 92 (upstream #1312): how a backgrounded Bash's terminal exit is reported. `held` is set only
+    // by the live pump — the exit of a still-running command is left out and its id recorded there, so
+    // the pump can send it when the task ends. Without `held` the exit goes out at the result.
+    background?: {
+      ended: (toolUseId: string) => BackgroundTaskEnd | undefined;
+      held?: Set<string>;
+    };
   },
 ): SessionNotification[] {
   const taskState = options?.taskState ?? new Map();
@@ -4768,12 +4833,21 @@ export function toAcpNotifications(
             };
           }
         } else if (toolUse.name !== "TodoWrite") {
+          const background = options?.background;
           const { _meta: toolMeta, ...toolUpdate } = toolUpdateFromToolResult(
             chunk,
             toolUseCache[chunk.tool_use_id],
             supportsTerminalOutput,
             toolUseResult,
+            background
+              ? { ended: background.ended, holdRunning: background.held !== undefined }
+              : undefined,
           );
+          // A terminal announced without its exit is a backgrounded command still running: remember it
+          // so the live pump sends the exit when the task ends.
+          if (background?.held && toolMeta?.terminal_info && !toolMeta.terminal_exit) {
+            background.held.add(toolMeta.terminal_info.terminal_id);
+          }
 
           // When terminal output is supported, send terminal_output as a
           // separate notification to match codex-acp's streaming lifecycle:
