@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.15.0](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.13...v0.15.0) (2026-10-14)
+
+
+### Added
+
+* **ultracode:** make Ultracode a switch driven by /effort ultracode on|off ([c9efc66](https://github.com/zeo-workspace/claude-agent-tui/commit/c9efc663d9fe661bdd0d29072152b204c1ebb520))
+
+
+### Fixed
+
+* **catalog:** read the model list without a model turn or user hooks ([772aba0](https://github.com/zeo-workspace/claude-agent-tui/commit/772aba00ae7c365cbd8df9215eb6bbcd263a1d1d))
+* **models:** size Haiku 5.5 at 1M and make the catalogue tests hermetic ([548198b](https://github.com/zeo-workspace/claude-agent-tui/commit/548198b5e609cac5e84cbea17ea579249dac18ce))
+
 ## [0.14.13](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.12...v0.14.13) (2026-10-11)
 
 
