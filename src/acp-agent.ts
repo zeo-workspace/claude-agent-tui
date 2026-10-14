@@ -99,6 +99,7 @@ import type { LocateOptions } from "./jsonl.js";
 import { linearizeTurns, readOrderedMessages, defaultGetMessages } from "./linearize.js";
 import { createDiffEnrichedReader } from "./diff-enriched-reader.js";
 import { backgroundTaskEnds, type BackgroundTaskEnd } from "./background-task-end.js";
+import { readTranscriptPermissionMode } from "./resumed-permission-mode.js";
 import type { DiffEnrichedReaderOptions } from "./diff-enriched-reader.js";
 import {
   sourceSubagentRows,
@@ -475,6 +476,11 @@ export interface StartedEngine {
   watcher?: JsonlWatcher | SessionWatcher;
   engine?: SessionEngine;
   cwd?: string;
+  /**
+   * Item 107: the located transcript, set by the replay-only load path so `createSession` can read
+   * the permission mode it last recorded. Absent on the spawning paths.
+   */
+  transcriptPath?: string;
 }
 
 /** Arguments passed to {@link StartEngine}. `sessionId` is the requested id for resume/fork; for a
@@ -838,13 +844,16 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     // sessionId glob ambiguous → resourceNotFound on the next load. A missing/ambiguous transcript
     // throws here → createSession's resume catch maps it to resourceNotFound (unchanged client
     // contract). No PTY, no tail watcher, no live engine — the only emission is replaySessionHistory.
-    const { cwd } = await resolveWatchTarget(args.sessionId, { ...args.locateOptions });
+    const { cwd, transcriptPath } = await resolveWatchTarget(args.sessionId, {
+      ...args.locateOptions,
+    });
     return {
       sessionId: args.sessionId,
       pty: REPLAY_ONLY_NOOP_PTY,
       watcher: undefined,
       engine: undefined,
       cwd,
+      transcriptPath,
     };
   }
 
@@ -3994,8 +4003,21 @@ export class ClaudeAcpAgent implements Agent {
     // is why the seed below can stay a constant.
     const liveModelCatalog = await resolveModelCatalog(this.logger, this.modelCatalogSource);
     const availableModes = buildAvailableModes(DEFAULT_MODEL_INFO, allowBypass);
+    // Item 107 (plus 0.23.5 / upstream #1218's mode half): a replay-only load starts no engine, so the
+    // pump that reconciles the mode from the transcript never runs, and the thread would advertise the
+    // settings default. Seed it from the mode the transcript last recorded instead — only a mode this
+    // session offers, so the bypass guard above still holds. Display-only: a loaded session runs
+    // nothing until it is resumed.
+    let currentModeId = seededMode;
+    if (creationOpts.replayOnly && started.transcriptPath) {
+      const recorded = await readTranscriptPermissionMode(started.transcriptPath);
+      if (recorded !== undefined && availableModes.some((m) => m.id === recorded)) {
+        // Every advertised mode id is a PermissionMode (buildAvailableModes builds them from it).
+        currentModeId = recorded as PermissionMode;
+      }
+    }
     const modes: SessionModeState = {
-      currentModeId: seededMode,
+      currentModeId,
       availableModes,
     };
     // Story 056 (R3.2): discover the main-thread agent personas for THIS session's cwd (glob-only via
