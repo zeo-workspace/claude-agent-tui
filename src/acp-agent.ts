@@ -4918,8 +4918,14 @@ export function toAcpNotifications(
       case "compaction_delta":
       case "advisor_tool_result":
       case "fallback":
+      case "mcp_tool_listing":
         // `fallback`: model-routing marker (@anthropic-ai/sdk >= 0.104) — from/to
         // model hops, no renderable content. No-op like the control blocks above.
+        //
+        // `mcp_tool_listing` (@anthropic-ai/sdk >= 0.131): the tool list an MCP
+        // server returned while the response was produced, carried so the API can
+        // reuse it when the message is sent back. A cache for the API, not content
+        // for the user — skipped like `container_upload`, as claude-agent-plus does.
         //
         // `mid_conv_system` sat in this list until @anthropic-ai/sdk 0.120.0, whose
         // changelog removes it as an "unsupported content block" — the API never
