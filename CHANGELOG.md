@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.16.1](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.0...v0.16.1) (2026-10-22)
+
+
+### Infrastructure
+
+* **deps:** bump github/codeql-action/upload-sarif ([024b665](https://github.com/zeo-workspace/claude-agent-tui/commit/024b665da3bb95db56c496fedd5ebaac2d30346c))
+* **deps:** bump the minor group with 2 updates ([7b53ec2](https://github.com/zeo-workspace/claude-agent-tui/commit/7b53ec2d12c5db14b3e49199b85e1788547de4bb))
+* **deps:** bump trufflesecurity/trufflehog from 3.99.0 to 3.99.2 ([4701d29](https://github.com/zeo-workspace/claude-agent-tui/commit/4701d295db53242756abd3011e82e728c07de9c6))
+* run trufflehog scanner 3.99.2 to match the pinned action ([334d476](https://github.com/zeo-workspace/claude-agent-tui/commit/334d4769b26f92af598707aae65095be9f82d364))
+
 ## [0.16.0](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.15.1...v0.16.0) (2026-10-14)
 
 
