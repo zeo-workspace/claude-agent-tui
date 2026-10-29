@@ -142,6 +142,9 @@ function failureExitCode(text: string): number | undefined {
  * Returns the original path if it's outside the project directory or if no cwd is provided.
  */
 export function toDisplayPath(filePath: string, cwd?: string): string {
+  // `path.resolve` throws on a non-string (upstream issue #1308); the type says
+  // string, but the value is a model's tool input. Port of claude-agent-plus.
+  if (typeof filePath !== "string") return displayValueOf(filePath) ?? "";
   if (!cwd) return filePath;
   const resolvedCwd = path.resolve(cwd);
   const resolvedFile = path.resolve(filePath);
@@ -149,6 +152,32 @@ export function toDisplayPath(filePath: string, cwd?: string): string {
     return path.relative(resolvedCwd, resolvedFile);
   }
   return filePath;
+}
+
+/** A tool input's path, when it is one: a non-empty string. Anything else — a
+ *  model can emit `{"file_path": 12345}`, which Claude Code rejects — is no
+ *  path, so it is neither resolved nor sent as a location or a diff target
+ *  (upstream issue #1308, ported from claude-agent-plus). */
+function pathOf(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** How a tool input value that is not a path still shows in a title: a number
+ *  or boolean as its text, so the failed call names what the model sent;
+ *  anything else (an object, null) as nothing. */
+function displayValueOf(value: unknown): string | undefined {
+  if (typeof value === "string") return value.length > 0 ? value : undefined;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return undefined;
+}
+
+/** The title form of a tool input's path: project-relative when it is a path
+ *  under `cwd`, the value's text when it is a scalar that is not a path. */
+function displayPathOf(value: unknown, cwd?: string): string | undefined {
+  const filePath = pathOf(value);
+  return filePath !== undefined ? toDisplayPath(filePath, cwd) : displayValueOf(value);
 }
 
 /**
@@ -205,6 +234,40 @@ function normalizeWriteInput(input: unknown): FileWriteInput | undefined {
   return { ...raw, file_path: filePath, content } as FileWriteInput;
 }
 
+/** Read a Bash input's description the way the CLI validates it. Since CLI
+ *  2.1.295 the CLI accepts `command_description` for `description`, but the
+ *  tool_use block keeps the key the model sent. The canonical key wins when both
+ *  spellings are present. (Upstream #1330, ported from claude-agent-plus.) */
+export function shellDescription(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const raw = input as Record<string, unknown>;
+  if (typeof raw.description === "string") return raw.description;
+  return typeof raw.command_description === "string" ? raw.command_description : undefined;
+}
+
+/** Read a Grep input's path the way the CLI validates it. Since CLI 2.1.292 the
+ *  CLI accepts `file_path` for `path`; the canonical key wins when both are
+ *  present. (Upstream #1271, ported from claude-agent-plus.) */
+export function grepPath(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const raw = input as Record<string, unknown>;
+  if (typeof raw.path === "string") return raw.path;
+  return typeof raw.file_path === "string" ? raw.file_path : undefined;
+}
+
+/** Read a Grep input's output mode the way the CLI validates it. Since CLI
+ *  2.1.295 the CLI reads a `-l` or `-c` flag (`true` or `"true"`) as
+ *  `output_mode: "files_with_matches"` or `"count"` when `output_mode` is
+ *  unset. (Upstream #1330, ported from claude-agent-plus.) */
+function grepOutputMode(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const raw = input as Record<string, unknown>;
+  if (typeof raw.output_mode === "string") return raw.output_mode;
+  if (raw["-l"] === true || raw["-l"] === "true") return "files_with_matches";
+  if (raw["-c"] === true || raw["-c"] === "true") return "count";
+  return undefined;
+}
+
 export function toolInfoFromToolUse(
   toolUse: RawToolUse,
   supportsTerminalOutput: boolean = false,
@@ -255,16 +318,17 @@ export function toolInfoFromToolUse(
 
     case "Bash": {
       const input = toolUse.input as BashInput | undefined;
+      const description = shellDescription(input);
       return {
         title: input?.command ? input.command : "Terminal",
         kind: "execute",
         content: supportsTerminalOutput
           ? [{ type: "terminal" as const, terminalId: toolUse.id }]
-          : input && input.description
+          : description
             ? [
                 {
                   type: "content",
-                  content: { type: "text", text: input.description },
+                  content: { type: "text", text: description },
                 },
               ]
             : [],
@@ -279,15 +343,16 @@ export function toolInfoFromToolUse(
       } else if (input?.offset) {
         limit = " (from line " + input.offset + ")";
       }
-      const displayPath = input?.file_path ? toDisplayPath(input.file_path, cwd) : "File";
+      const filePath = pathOf(input?.file_path);
+      const displayPath = displayPathOf(input?.file_path, cwd) ?? "File";
       return {
         title: "Read " + displayPath + limit,
         kind: "read",
-        locations: input?.file_path
+        locations: filePath
           ? [
               {
-                path: input.file_path,
-                line: input.offset ?? 1,
+                path: filePath,
+                line: input?.offset ?? 1,
               },
             ]
           : [],
@@ -297,12 +362,13 @@ export function toolInfoFromToolUse(
 
     case "Write": {
       const input = normalizeWriteInput(toolUse.input);
+      const filePath = pathOf(input?.file_path);
       let content: ToolCallContent[] = [];
-      if (input && input.file_path) {
+      if (input && filePath) {
         content = [
           {
             type: "diff",
-            path: input.file_path,
+            path: filePath,
             oldText: null,
             newText: input.content,
           },
@@ -315,39 +381,41 @@ export function toolInfoFromToolUse(
           },
         ];
       }
-      const displayPath = input?.file_path ? toDisplayPath(input.file_path, cwd) : undefined;
+      const displayPath = displayPathOf(input?.file_path, cwd);
       return {
         title: displayPath ? `Write ${displayPath}` : "Write",
         kind: "edit",
         content,
-        locations: input?.file_path ? [{ path: input.file_path }] : [],
+        locations: filePath ? [{ path: filePath }] : [],
       };
     }
 
     case "Edit": {
       const input = toolUse.input as FileEditInput | undefined;
+      const filePath = pathOf(input?.file_path);
       let content: ToolCallContent[] = [];
-      if (input && input.file_path && (input.old_string || input.new_string)) {
+      if (input && filePath && (input.old_string || input.new_string)) {
         content = [
           {
             type: "diff",
-            path: input.file_path,
+            path: filePath,
             oldText: input.old_string || null,
             newText: input.new_string ?? "",
           },
         ];
       }
-      const displayPath = input?.file_path ? toDisplayPath(input.file_path, cwd) : undefined;
+      const displayPath = displayPathOf(input?.file_path, cwd);
       return {
         title: displayPath ? `Edit ${displayPath}` : "Edit",
         kind: "edit",
         content,
-        locations: input?.file_path ? [{ path: input.file_path }] : [],
+        locations: filePath ? [{ path: filePath }] : [],
       };
     }
 
     case "Glob": {
       const input = toolUse.input as GlobInput | undefined;
+      const globPath = pathOf(input?.path);
       let label = "Find";
       if (input?.path) {
         label += ` \`${input.path}\``;
@@ -359,7 +427,7 @@ export function toolInfoFromToolUse(
         title: label,
         kind: "search",
         content: [],
-        locations: input?.path ? [{ path: input.path }] : [],
+        locations: globPath ? [{ path: globPath }] : [],
       };
     }
 
@@ -384,8 +452,9 @@ export function toolInfoFromToolUse(
         label += ` -C ${input["-C"]}`;
       }
 
-      if (input?.output_mode) {
-        switch (input.output_mode) {
+      const outputMode = grepOutputMode(input);
+      if (outputMode) {
+        switch (outputMode) {
           case "files_with_matches":
             label += " -l";
             break;
@@ -418,8 +487,9 @@ export function toolInfoFromToolUse(
         label += ` "${input.pattern}"`;
       }
 
-      if (input?.path) {
-        label += ` ${input.path}`;
+      const searchPath = grepPath(input);
+      if (searchPath) {
+        label += ` ${searchPath}`;
       }
 
       return {

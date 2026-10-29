@@ -13,6 +13,7 @@
 // node:test runner: `node --experimental-strip-types --test test/claude-path-version.test.ts`
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 // Story 059: dist over src — claude-path.ts gained a src→src `./image-vision-smoke.js` import (story 058)
 // that does not resolve from src/ under --experimental-strip-types; import the built module (the dominant
 // test convention, cf. engine-pty in claude-path-resolve.test.ts) so the compiled module resolves.
@@ -92,6 +93,20 @@ test("reportVersionDrift: silent when detected is null (nothing to compare) (R1.
 
 // === PROVENANCE_CLAUDE_VERSION — the pin the drift is measured against ========================
 
-test("PROVENANCE_CLAUDE_VERSION is the provenance pin 2.1.159", () => {
-  assert.equal(PROVENANCE_CLAUDE_VERSION, "2.1.159");
+// Story 063 — the pin equals the CLI the suite was verified on (2.1.312, installed 2026-10-29), so
+// start-up on that CLI logs no drift.
+test("063 PROVENANCE_CLAUDE_VERSION is the provenance pin 2.1.312", () => {
+  assert.equal(PROVENANCE_CLAUDE_VERSION, "2.1.312");
+});
+
+test("063 the pin equals .fork-provenance.json's claude entry", () => {
+  const provenance = JSON.parse(readFileSync(new URL("../.fork-provenance.json", import.meta.url), "utf8"));
+  const claude = provenance.externalRuntimeDeps.find((d: { name: string }) => d.name === "claude");
+  assert.equal(claude.version, PROVENANCE_CLAUDE_VERSION);
+});
+
+test("063 no drift report for the verified CLI against the pin", () => {
+  const calls: string[] = [];
+  reportVersionDrift("2.1.312", PROVENANCE_CLAUDE_VERSION, (...args) => calls.push(args.join(" ")));
+  assert.equal(calls.length, 0);
 });

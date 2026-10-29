@@ -139,6 +139,8 @@ import {
   clientSupportsBooleanConfigOptions,
   resolveFastModeEnabled,
   ULTRACODE_CONFIG_ID,
+  ULTRACODE_EFFORT_LEVEL,
+  LEGACY_ULTRACODE_EFFORT_VALUE,
   ultracodeCommand,
   isUltracodeCapableModel,
   resolveUltracodeEnabled,
@@ -163,6 +165,7 @@ import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gat
 // re-spawn regeneration (R2.4). The module never logs the scratch contents/path-with-secrets (R2.3).
 import { translateMcpServers, writeMcpScratch, removeMcpScratch } from "./mcp-config-writer.js";
 import { materializeImage, cleanupMaterializedImages } from "./image-input.js";
+import { deleteSessionIfStored } from "./session-delete.js";
 
 export const CLAUDE_CONFIG_DIR =
   process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
@@ -2264,7 +2267,9 @@ export class ClaudeAcpAgent implements Agent {
     if (this.sessions[params.sessionId]) {
       await this.teardownSession(params.sessionId);
     }
-    await deleteSession(params.sessionId);
+    // A never-prompted, unknown or non-UUID session has no transcript, and
+    // deleting it succeeds (upstream #1351); any other SDK failure still fails.
+    await deleteSessionIfStored(params.sessionId, deleteSession);
     return {};
   }
 
@@ -2339,6 +2344,34 @@ export class ClaudeAcpAgent implements Agent {
       "options" in option && Array.isArray(option.options)
         ? option.options.flatMap((o) => ("options" in o ? o.options : [o]))
         : [];
+
+    // Story 063 — the retired `ultracode` effort notch, accepted as deprecated from clients that
+    // still send it and mapped as claude-agent-plus maps it: effort xhigh plus the Ultracode switch
+    // on. Only where this model's effort select offers xhigh; elsewhere it is rejected below like any
+    // unknown value. `ultracode` itself is never typed as an effort level.
+    if (
+      params.configId === "effort" &&
+      params.value === LEGACY_ULTRACODE_EFFORT_VALUE &&
+      allValues.some((o) => o.value === ULTRACODE_EFFORT_LEVEL)
+    ) {
+      this.logger.log(
+        `[ultracode] event=legacy_effort_value_mapped session=${params.sessionId} effort=${ULTRACODE_EFFORT_LEVEL}`,
+      );
+      this.applyEffortChange(session, ULTRACODE_EFFORT_LEVEL);
+      await this.applyConfigOptionValue(
+        params.sessionId,
+        session,
+        "effort",
+        ULTRACODE_EFFORT_LEVEL,
+      );
+      await this.applyUltracodeChange(params.sessionId, session, true);
+      session.configOptions = this.rebuildConfigOptionsPreserving(
+        session,
+        this.currentModel(session),
+      );
+      return { configOptions: session.configOptions };
+    }
+
     let validValue = allValues.find((o) => o.value === params.value);
 
     // For model options, fall back to resolveModelPreference when the exact

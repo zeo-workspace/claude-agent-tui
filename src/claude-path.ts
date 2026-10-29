@@ -35,7 +35,7 @@ import { reportImageVisionSmoke } from "./image-vision-smoke.js";
  * binary whose version differs only triggers a soft drift *warning* (R1.2), never
  * a resolution failure.
  */
-export const PROVENANCE_CLAUDE_VERSION = "2.1.159";
+export const PROVENANCE_CLAUDE_VERSION = "2.1.312";
 
 /** Shared install hint appended to the fail-loud resolution error (R1.3). */
 const INSTALL_HINT = 'Install the Claude Code subscription CLI or ensure "claude" is on PATH.';
