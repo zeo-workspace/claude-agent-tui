@@ -437,11 +437,64 @@ test("84.10 applyUltracodeSettings is absence-safe", async (t) => {
   assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), {});
 });
 
-test("84 the legacy `ultracode` effort value is rejected — it is no longer an effort level", async (t) => {
+// Story 063 — the retired `ultracode` effort notch is accepted as deprecated and mapped the way
+// claude-agent-plus maps it (applyLegacyUltracodeEffort): effort xhigh plus the Ultracode switch on,
+// only where the model's effort select offers xhigh. It is never typed as an effort level.
+
+test("063 legacy `ultracode` effort: accepted, mapped to xhigh + the Ultracode switch, no re-spawn", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "effort", "low");
+  const callsBefore = fake.calls.length;
+  fake.writes.length = 0;
+
+  await setOption(agent, sessionId, "effort", "ultracode");
+  const typed = fake.writes.join("");
+  assert.ok(typed.includes("/effort xhigh"), JSON.stringify(typed));
+  assert.ok(typed.includes("/effort ultracode on"), JSON.stringify(typed));
+  assert.equal(option(sessions, sessionId, "effort")?.currentValue, "xhigh");
+  assert.equal(option(sessions, sessionId, "ultracode")?.currentValue, true);
+  assert.equal(sessions[sessionId].ultracodeOn, true);
+  assert.equal(fake.calls.length, callsBefore, "no re-spawn");
+});
+
+test("063 hostile: legacy `ultracode` never reaches the CLI as an effort level", async (t) => {
   const fake = makeStartEngine();
   const clock = makeClock();
   const { agent, sessionId } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "effort", "ultracode");
+  const typed = fake.writes.join("");
+  assert.doesNotMatch(typed, /\/effort ultracode(\r|$)/);
+  assert.ok(fake.calls.every((c) => c.effortLevel !== "ultracode"));
+});
+
+test("063 hostile: legacy `ultracode` on a model without xhigh is rejected", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "model", "lowcap");
   await assert.rejects(setOption(agent, sessionId, "effort", "ultracode"), /Invalid value/);
+});
+
+test("063 hostile: an unknown effort value is still rejected", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId } = await newSession(t, fake.startEngine, clock.schedule);
+  await assert.rejects(setOption(agent, sessionId, "effort", "turbo"), /Invalid value/);
+});
+
+test("063 unchanged: the five real levels are typed as `/effort <level>` and leave Ultracode alone", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  for (const level of ["low", "medium", "high", "xhigh", "max"]) {
+    fake.writes.length = 0;
+    await setOption(agent, sessionId, "effort", level);
+    assert.ok(fake.writes.join("").includes(`/effort ${level}`), level);
+    assert.equal(option(sessions, sessionId, "effort")?.currentValue, level);
+  }
+  assert.notEqual(sessions[sessionId].ultracodeOn, true);
 });
 
 test("billing seam — the Ultracode path introduces no -p/--print/stream-json token", async (t) => {

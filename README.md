@@ -71,6 +71,18 @@ npm test
 - Token-usage updates
 - Prompt input, cancellation, and session load/replay
 
+## Release notes
+
+**0.16.3** — security and hygiene:
+
+- zod 4.6.7 (GHSA-mrhx).
+- Fast mode is detected on any model, not only Opus.
+- A tool call with a non-string path no longer breaks its title; Grep and Bash titles show the CLI's input aliases (`file_path`, `-l`, `-c`, `command_description`).
+- Deleting a never-prompted, unknown or non-UUID session succeeds.
+- `effort = "ultracode"` is accepted as deprecated and maps to effort `xhigh` plus the Ultracode switch.
+
+The full per-commit log is [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Supply-chain notes
 
 [Socket](https://socket.dev/npm/package/@lucascouts/claude-agent-tui) flags some

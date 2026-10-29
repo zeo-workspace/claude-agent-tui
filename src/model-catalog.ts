@@ -351,8 +351,18 @@ function stripControlSequences(raw: string): string {
  * Story 073 (R1) — the `/fast` panel header, present in BOTH the available and gated renders (verified
  * live in the spike). Its presence means the panel finished rendering, so a verdict can be reached; its
  * absence means "not rendered yet" → pending.
+ *
+ * Story 063 — the first two anchors are model-conditional: CLI 2.1.310 renders ` (research preview)`
+ * only for some models, and the second matches an Opus display name only. The panel's description line
+ * (`High-speed mode for <name>. Draws from usage credits at a higher rate.`, in 2.1.302 and 2.1.310)
+ * does not name the model, so it is the anchor that holds on every one. It also appears on the gated
+ * panel, which is safe because the gate markers are checked first.
  */
-const FAST_PANEL_ANCHORS = [/fast mode \(research preview\)/i, /high-speed mode for opus/i];
+const FAST_PANEL_ANCHORS = [
+  /fast mode \(research preview\)/i,
+  /high-speed mode for opus/i,
+  /draws from usage credits at a higher rate/i,
+];
 
 /** Story 073 (R1) — still resolving. Checked BEFORE the gate markers because the CLI renders this as
  *  `Fast mode unavailable: Checking fast mode availability`, which also matches a gate substring. */
@@ -408,6 +418,13 @@ export const ULTRACODE_CONFIG_ID = "ultracode";
  * Item 84 — the CLI command that turns Ultracode on or off for the session. Always the explicit
  * `on|off` form: never a bare `/effort ultracode`, whose meaning the CLI has changed between builds.
  */
+/** Story 063 — the effort level the retired `ultracode` notch maps to (claude-agent-plus's
+ *  `ULTRACODE_EFFORT_LEVEL`): the level the CLI requires for Ultracode. */
+export const ULTRACODE_EFFORT_LEVEL = "xhigh";
+
+/** Story 063 — the value the old effort-select notch carried; accepted as deprecated. */
+export const LEGACY_ULTRACODE_EFFORT_VALUE = "ultracode";
+
 export function ultracodeCommand(on: boolean): string {
   return on ? "/effort ultracode on" : "/effort ultracode off";
 }

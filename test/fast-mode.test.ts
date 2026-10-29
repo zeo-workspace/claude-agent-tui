@@ -97,6 +97,66 @@ test("R1 classifyFastModeSignal: other gate reasons (subscription/org/api-only) 
   }
 });
 
+// ---- Story 063 — a model-independent anchor ----------------------------------------------------
+//
+// CLI 2.1.310 renders ` (research preview)` only for some models (0 occurrences of the joined
+// `Fast mode (research preview)` in its strings, 2 in 2.1.302), and the second anchor matched only an
+// Opus display name. Both binaries carry `High-speed mode for <name>. Draws from usage credits at a
+// higher rate.` (/var/tmp/zeo-r23-E/cli-2.1.3{02,10}.strings), whatever the model.
+
+const PANEL_2_1_310_NO_SUFFIX_SONNET =
+  "↯ Fast mode\n" +
+  "High-speed mode for Sonnet 5.5. Draws from usage credits at a higher rate. Separate rate limits apply.\n" +
+  "  ON   OFF   ← fast mode resets when switching models\n" +
+  "Learn more: https://code.claude.com/docs/en/fast-mode   Esc to cancel";
+
+test("063 hostile: a gated panel carrying the new anchor stays unavailable", () => {
+  for (const gate of [
+    "Fast mode requires usage credits · /usage-credits to turn them on",
+    "Fast mode requires a paid subscription",
+    "Fast mode has been disabled by your organization",
+    "Fast mode is only available when using the Anthropic API directly",
+    "Fast mode is currently unavailable",
+  ]) {
+    const panel = `↯ Fast mode\nHigh-speed mode for Sonnet 5.5. Draws from usage credits at a higher rate.\n${gate}`;
+    assert.equal(classifyFastModeSignal(panel), "unavailable", gate);
+  }
+});
+
+test("063 hostile: the new anchor does not turn a pending panel into a verdict", () => {
+  assert.equal(
+    classifyFastModeSignal(
+      "Fast mode unavailable: Checking fast mode availability\nDraws from usage credits at a higher rate.",
+    ),
+    "pending",
+  );
+});
+
+test("063 2.1.310 available panel, non-Opus name, no suffix → available", () => {
+  assert.equal(classifyFastModeSignal(PANEL_2_1_310_NO_SUFFIX_SONNET), "available");
+});
+
+test("063 the anchor survives ANSI noise between its words", () => {
+  const ansi = "\x1b[2K↯ Fast mode\x1b[0m\x1b[3;1HHigh-speed mode for Haiku. Draws from usage\x1b[0m credits at a higher rate.";
+  assert.equal(classifyFastModeSignal(ansi), "available");
+});
+
+test("063 unchanged: the 2.1.302 panel with the suffix stays available", () => {
+  assert.equal(
+    classifyFastModeSignal("↯ Fast mode (research preview)\nHigh-speed mode for Opus 4.8.\n  ON   OFF"),
+    "available",
+  );
+});
+
+test("063 unchanged: the Opus 5.5 template stays available", () => {
+  assert.equal(classifyFastModeSignal("↯ Fast mode\nHigh-speed mode for Opus 5.5.\n  ON   OFF"), "available");
+});
+
+test("063 unchanged: empty buffer and the checking line stay pending", () => {
+  assert.equal(classifyFastModeSignal(""), "pending");
+  assert.equal(classifyFastModeSignal(PENDING_PANEL), "pending");
+});
+
 // ---- Task 3.1 (R1) live-drive probe — exercised offline via a fake signal-emitting pty ------------
 //
 // A fake pty that, once `/fast` is submitted, feeds `panel` to the probe's onData listener (the real
