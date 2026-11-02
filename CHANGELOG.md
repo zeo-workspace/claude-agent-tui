@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.16.4](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.3...v0.16.4) (2026-11-02)
+
+
+### Infrastructure
+
+* **deps:** bump actions/create-github-app-token from 3.2.0 to 3.3.0 ([e33c6f7](https://github.com/zeo-workspace/claude-agent-tui/commit/e33c6f7a67ed22ba1c332700f61c3cb9787749d8))
+* **deps:** bump fast-uri from 3.1.8 to 3.1.9 ([10c5140](https://github.com/zeo-workspace/claude-agent-tui/commit/10c514013f2101f7562c76b59f91c9b2fa0b35af))
+* **deps:** bump github/codeql-action/upload-sarif ([860fc52](https://github.com/zeo-workspace/claude-agent-tui/commit/860fc52ebfb45e80784d944357e30ccf606a4353))
+* **deps:** bump google/osv-scanner-action/osv-scanner-action ([45fdab8](https://github.com/zeo-workspace/claude-agent-tui/commit/45fdab82559ac7d85d3d83e8d20d69211b6f0df9))
+* **deps:** bump ossf/scorecard-action from 2.4.4 to 2.5.0 ([a1a8af0](https://github.com/zeo-workspace/claude-agent-tui/commit/a1a8af03c77567a4bb153cb9be0c9d06a256eccc))
+* **deps:** bump the minor group across 1 directory with 19 updates ([3041568](https://github.com/zeo-workspace/claude-agent-tui/commit/3041568c876bac3116d669e02f0a7ff3c292b6e5))
+* **deps:** bump trufflesecurity/trufflehog from 3.99.2 to 3.99.7 ([8333cde](https://github.com/zeo-workspace/claude-agent-tui/commit/8333cdedf514af301c13d5d98510f3130748f24c))
+* run trufflehog scanner 3.99.7 to match the pinned action ([c061bbd](https://github.com/zeo-workspace/claude-agent-tui/commit/c061bbd04dd5dfeea2d8007732203c6c8df71840))
+
 ## [0.16.3](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.2...v0.16.3) (2026-10-29)
 
 
