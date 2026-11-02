@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.16.5](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.4...v0.16.5) (2026-11-02)
+
+
+### Fixed
+
+* **deps:** override minimatch to 11.0.1 (GHSA-g3hv-75wg-m249) ([a9e1d88](https://github.com/zeo-workspace/claude-agent-tui/commit/a9e1d885229cb56bfe5c03a105574db5864eb106))
+
+
+### Infrastructure
+
+* **deps:** bump qs from 6.16.1 to 6.17.1 ([4b8aa0d](https://github.com/zeo-workspace/claude-agent-tui/commit/4b8aa0dfe0b122f8df44e90db8cbf7878d3e1e6a))
+
 ## [0.16.4](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.3...v0.16.4) (2026-11-02)
 
 
