@@ -23,7 +23,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { randomUUID } from "node:crypto";
-import type { McpServer, HttpHeader, EnvVariable } from "@agentclientprotocol/sdk";
+import type { McpServer, HttpHeader, EnvVariable } from "@agentclientprotocol/sdk/unstable";
 
 /**
  * A single entry under claude's `--mcp-config` `mcpServers` map. A discriminated union over the

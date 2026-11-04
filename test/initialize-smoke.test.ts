@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ClientSideConnection, ndJsonStream } from "@agentclientprotocol/sdk";
+import { ndJsonStream } from "@agentclientprotocol/sdk/unstable";
+import { connectTestClient } from "./helpers/acp-client-connection.ts";
 import { nodeToWebReadable, nodeToWebWritable } from "../dist/utils.js";
 
 // Story 011 / Task 3 — smoke-test `initialize` over the REAL ND-JSON stdio transport
@@ -55,8 +56,7 @@ before(
 
     // initialize triggers no agent→client callbacks; this minimal Client satisfies
     // the connection factory. An unexpected callback throws loudly (READ-ONLY).
-    const connection = new ClientSideConnection(
-      () => ({
+    const connection = connectTestClient({
         async requestPermission() {
           throw new Error("unexpected client callback during READ-ONLY initialize smoke");
         },
@@ -67,7 +67,7 @@ before(
         async readTextFile() {
           return { content: "" };
         },
-      }),
+      },
       stream,
     );
 

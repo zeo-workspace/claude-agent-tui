@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ClaudeAcpAgent } from "../dist/acp-agent.js";
-import type { AvailableCommand } from "@agentclientprotocol/sdk";
+import type { AvailableCommand } from "@agentclientprotocol/sdk/unstable";
 
 type CapturedUpdate = { sessionUpdate: string; availableCommands?: AvailableCommand[] };
 

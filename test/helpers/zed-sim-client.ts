@@ -19,8 +19,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ClientSideConnection, ndJsonStream } from "@agentclientprotocol/sdk";
-import type { Agent, Client } from "@agentclientprotocol/sdk";
+import { ndJsonStream } from "@agentclientprotocol/sdk/unstable";
+import {
+  connectTestClient,
+  type TestClient,
+  type TestClientConnection,
+} from "./acp-client-connection.ts";
 import { nodeToWebReadable, nodeToWebWritable } from "../../dist/utils.js";
 
 // The built fork root (…/fork) — the spawn cwd so `dist/index.js` resolves and the agent
@@ -59,7 +63,7 @@ export interface ZedSimOptions {
 
 export interface ZedSim {
   /** The SDK ClientSideConnection — the agent proxy (initialize / newSession / loadSession). */
-  agent: Agent;
+  agent: TestClientConnection;
   /** Every `sessionUpdate` notification param, in arrival order. */
   captured: any[];
   /** The spawned fork child process (stderr is piped and accumulated for diagnostics). */
@@ -150,7 +154,7 @@ export function startZedSim(opts: ZedSimOptions = {}): ZedSim {
   // hook (sub-task 3.2) runs BEFORE the buffer push: if it throws, the throw propagates as the
   // client handler's rejection over the genuine transport (a real ACP client error), and the
   // notification is NOT captured — exactly how a rejecting Zed would behave for that update.
-  const testClient: Client = {
+  const testClient: TestClient = {
     async sessionUpdate(params) {
       if (opts.onSessionUpdate) await opts.onSessionUpdate(params);
       captured.push(params);
@@ -170,7 +174,7 @@ export function startZedSim(opts: ZedSimOptions = {}): ZedSim {
   // is ndJsonStream(writable, readable); a swapped order or Node-vs-Web streams deadlocks
   // the JSON-RPC handshake — hence the reuse of the production helpers.
   const stream = ndJsonStream(nodeToWebWritable(child.stdin!), nodeToWebReadable(child.stdout!));
-  const agent = new ClientSideConnection(() => testClient, stream);
+  const agent = connectTestClient(testClient, stream);
 
   let disposed = false;
   const dispose = () => {

@@ -5,7 +5,7 @@
 // it never throws, and an unrecognized non-null variant is surfaced (logged) and defaulted rather
 // than silently dropped, so model/stop-reason drift is observable for telemetry (R3.3).
 
-import type { StopReason } from "@agentclientprotocol/sdk";
+import type { StopReason } from "@agentclientprotocol/sdk/unstable";
 
 /** Telemetry sink for an unmapped stop_reason (drift). Structural — the acp-agent logger satisfies it. */
 export interface StopReasonLogger {

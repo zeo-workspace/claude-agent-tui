@@ -27,10 +27,10 @@
 //   • Injection seam: the CONVENIENCE pass uses `opts?.translate ?? toAcpNotifications`; the CORE
 //     pass ALWAYS uses the real `toAcpNotifications`. A test forces a contained throw by injecting
 //     `opts.translate = () => { throw … }`, proving the core stream survives a convenience failure.
-import { type AgentSideConnection, type SessionNotification } from "@agentclientprotocol/sdk";
+import { type SessionNotification } from "@agentclientprotocol/sdk/unstable";
 import { type ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import { BetaContentBlock, BetaRawContentBlockDelta } from "@anthropic-ai/sdk/resources/beta.mjs";
-import { toAcpNotifications, type Logger, type ToolUseCache } from "./acp-agent.js";
+import { toAcpNotifications, type AcpClient, type Logger, type ToolUseCache } from "./acp-agent.js";
 
 /**
  * Per-surface enable flags for the convenience translation. Each surface is gated independently so
@@ -122,7 +122,7 @@ export function translateBestEffort(
   role: "assistant" | "user",
   sessionId: string,
   cache: ToolUseCache,
-  client: AgentSideConnection,
+  client: AcpClient,
   logger: Logger,
   flags: ConvenienceFlags,
   opts?: { translate?: TranslateFn },

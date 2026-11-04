@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import {
   zCreateElicitationRequest,
   zCreateElicitationResponse,
-} from "../node_modules/@agentclientprotocol/sdk/dist/schema/zod.gen.js";
+} from "../node_modules/@agentclientprotocol/sdk/dist/v1/unstable/schema/zod.gen.js";
 import {
   buildElicitationRequest,
   mapOutcomeToDecision,

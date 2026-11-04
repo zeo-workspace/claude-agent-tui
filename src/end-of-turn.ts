@@ -11,7 +11,7 @@
 // Task 1.1 — the terminal-stop predicate: the pure core that identifies the single terminal-stop
 // `assistant` boundary candidate per turn.
 
-import type { PromptResponse } from "@agentclientprotocol/sdk";
+import type { PromptResponse } from "@agentclientprotocol/sdk/unstable";
 import { TURN_WATCHDOG_MS } from "./linearize.js";
 import { FILE_DISCOVERY_WATCHDOG_MS } from "./jsonl.js";
 import { mapStopReason, type StopReasonLogger } from "./stop-reason-map.js";
