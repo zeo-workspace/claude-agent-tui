@@ -9,7 +9,7 @@
 // Kept a self-contained module (cf. diff-source.ts) imported by the acp-agent pump; it does
 // NOT go through lib.ts (the frozen upstream export surface).
 
-import type { SessionUpdate } from "@agentclientprotocol/sdk";
+import type { SessionUpdate } from "@agentclientprotocol/sdk/unstable";
 
 /** The UNSTABLE `usage_update` variant of the SDK 0.22.1 SessionUpdate union. */
 export type UsageUpdateNotification = Extract<SessionUpdate, { sessionUpdate: "usage_update" }>;

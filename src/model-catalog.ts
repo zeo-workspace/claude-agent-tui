@@ -13,7 +13,7 @@
 // PURE DATA — no spawn, no agent, no `claude`. `ModelInfo` is the SDK shape from
 // `@anthropic-ai/claude-agent-sdk` (the same type `acp-agent.ts` builds its model list from).
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
-import type { ClientCapabilities, SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { ClientCapabilities, SessionConfigOption } from "@agentclientprotocol/sdk/unstable";
 
 /**
  * Effort levels offered for reasoning-capable models — the SDK's `supportedEffortLevels` vocabulary.

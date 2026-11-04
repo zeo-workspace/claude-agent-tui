@@ -62,7 +62,7 @@
 // `~/.claude/file-history/<uuid>/<hash>@vN` tree is recorded as an OPTIONAL old-version index ONLY;
 // its `<uuid>`↔session key is unknown and it is to be investigated ONLY if an old-version lookup is
 // ever needed — this module neither builds nor queries it.
-import type { ToolCallContent } from "@agentclientprotocol/sdk";
+import type { ToolCallContent } from "@agentclientprotocol/sdk/unstable";
 import { toolUpdateFromDiffToolResponse } from "./tools.js";
 
 /** A single diff hunk — the unit the reused `toolUpdateFromDiffToolResponse` reads `lines` from. */

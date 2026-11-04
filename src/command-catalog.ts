@@ -40,7 +40,7 @@ import { homedir as osHomedir } from "node:os";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 // TYPE-ONLY import — erased at runtime, adds no runtime dependency.
-import type { AvailableCommand } from "@agentclientprotocol/sdk";
+import type { AvailableCommand } from "@agentclientprotocol/sdk/unstable";
 
 /**
  * The curated built-in slash-command tier (R9) — the interactive `claude` TUI's own built-ins, which are

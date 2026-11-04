@@ -1,6 +1,6 @@
 import {
-  Agent,
-  AgentSideConnection,
+  agent as acpAgent,
+  type AgentContext,
   AuthenticateRequest,
   AuthMethod,
   CancelNotification,
@@ -42,7 +42,12 @@ import {
   WriteTextFileRequest,
   WriteTextFileResponse,
   AvailableCommand,
-} from "@agentclientprotocol/sdk";
+  CreateElicitationRequest,
+  CreateElicitationResponse,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  methods,
+} from "@agentclientprotocol/sdk/unstable";
 import {
   deleteSession,
   getSessionInfo,
@@ -1598,11 +1603,52 @@ function deriveSubagentLabel(
   return undefined;
 }
 
-export class ClaudeAcpAgent implements Agent {
+/**
+ * The client surface the agent calls back into — the five methods this fork uses, named as ACP
+ * 1.x's `AgentSideConnection` named them, so every caller (the permission relay, the elicitation
+ * bridge, the notification writers) is unchanged. ACP SDK 2.x removed that class (story 071);
+ * {@link ClientConnection} backs this interface with the connection's peer context instead, the
+ * same shape the plus adapter took in upstream #790.
+ */
+export interface AcpClient {
+  sessionUpdate(params: SessionNotification): Promise<void>;
+  requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse>;
+  readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse>;
+  writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse>;
+  createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
+}
+
+/** {@link AcpClient} over the connection-scoped peer context `connect(...)` returns as `.client`;
+ *  each method sends exactly the request or notification ACP 1.x's class sent. */
+export class ClientConnection implements AcpClient {
+  constructor(private readonly ctx: AgentContext) {}
+
+  sessionUpdate(params: SessionNotification): Promise<void> {
+    return this.ctx.notify(methods.client.session.update, params);
+  }
+
+  requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+    return this.ctx.request(methods.client.session.requestPermission, params);
+  }
+
+  readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+    return this.ctx.request(methods.client.fs.readTextFile, params);
+  }
+
+  writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
+    return this.ctx.request(methods.client.fs.writeTextFile, params);
+  }
+
+  createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    return this.ctx.request(methods.client.elicitation.create, params);
+  }
+}
+
+export class ClaudeAcpAgent {
   sessions: {
     [key: string]: Session;
   };
-  client: AgentSideConnection;
+  client: AcpClient;
   toolUseCache: ToolUseCache;
   backgroundTerminals: { [key: string]: BackgroundTerminal } = {};
   clientCapabilities?: ClientCapabilities;
@@ -1664,7 +1710,7 @@ export class ClaudeAcpAgent implements Agent {
   private readonly engines: Map<string, SessionEngine> = new Map();
 
   constructor(
-    client: AgentSideConnection,
+    client: AcpClient,
     logger?: Logger,
     engine: Engine = createStubEngine(),
     deps: AgentDeps = {},
@@ -4620,7 +4666,7 @@ export function toAcpNotifications(
   role: "assistant" | "user",
   sessionId: string,
   toolUseCache: ToolUseCache,
-  client: AgentSideConnection,
+  client: AcpClient,
   logger: Logger,
   options?: {
     registerHooks?: boolean;
@@ -5009,7 +5055,7 @@ export function streamEventToAcpNotifications(
   message: SDKPartialAssistantMessage,
   sessionId: string,
   toolUseCache: ToolUseCache,
-  client: AgentSideConnection,
+  client: AcpClient,
   logger: Logger,
   options?: {
     clientCapabilities?: ClientCapabilities;
@@ -5071,13 +5117,45 @@ export function runAcp(deps?: AgentDeps) {
   const output = nodeToWebReadable(process.stdin);
 
   const stream = ndJsonStream(input, output);
-  let agent!: ClaudeAcpAgent;
-  const connection = new AgentSideConnection((client) => {
-    // Positions 2-3 (logger/engine) default; `deps` carries the bootstrap-resolved flags
-    // (story 038: usageUpdate from process.env.USAGE_UPDATE, default OFF).
-    agent = new ClaudeAcpAgent(client, undefined, undefined, deps);
-    return agent;
-  }, stream);
+  // ACP SDK 2.x removed `AgentSideConnection` (story 071). The handlers are the ones ACP 1.8.0's
+  // own legacy adapter (`legacyAgentApp`, dist/acp.js) registered for this class — same methods,
+  // same `?? {}` for the calls that may return nothing — so the wire is unchanged. They close over
+  // `agent`, assigned right after `connect()` returns, before any inbound message is processed.
+  // eslint-disable-next-line prefer-const
+  let agent: ClaudeAcpAgent;
+  const connection = acpAgent()
+    .onRequest(methods.agent.initialize, (ctx) => agent.initialize(ctx.params))
+    .onRequest(methods.agent.session.new, (ctx) => agent.newSession(ctx.params))
+    .onRequest(
+      methods.agent.authenticate,
+      async (ctx) => (await agent.authenticate(ctx.params)) ?? {},
+    )
+    .onRequest(methods.agent.session.prompt, (ctx) => agent.prompt(ctx.params))
+    .onNotification(methods.agent.session.cancel, (ctx) => agent.cancel(ctx.params))
+    .onRequest(methods.agent.session.load, (ctx) => agent.loadSession(ctx.params))
+    .onRequest(methods.agent.session.list, (ctx) => agent.listSessions(ctx.params))
+    .onRequest(
+      methods.agent.session.delete,
+      async (ctx) => (await agent.deleteSession(ctx.params)) ?? {},
+    )
+    .onRequest(methods.agent.session.fork, (ctx) => agent.unstable_forkSession(ctx.params))
+    .onRequest(methods.agent.session.resume, (ctx) => agent.resumeSession(ctx.params))
+    .onRequest(
+      methods.agent.session.close,
+      async (ctx) => (await agent.closeSession(ctx.params)) ?? {},
+    )
+    .onRequest(
+      methods.agent.session.setMode,
+      async (ctx) => (await agent.setSessionMode(ctx.params)) ?? {},
+    )
+    .onRequest(methods.agent.session.setConfigOption, (ctx) =>
+      agent.setSessionConfigOption(ctx.params),
+    )
+    .onRequest(methods.agent.logout, async (ctx) => (await agent.logout(ctx.params)) ?? {})
+    .connect(stream);
+  // Positions 2-3 (logger/engine) default; `deps` carries the bootstrap-resolved flags
+  // (story 038: usageUpdate from process.env.USAGE_UPDATE, default OFF).
+  agent = new ClaudeAcpAgent(new ClientConnection(connection.client), undefined, undefined, deps);
   return { connection, agent };
 }
 

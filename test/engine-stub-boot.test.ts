@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { AgentSideConnection, ndJsonStream } from "@agentclientprotocol/sdk";
-import { ClaudeAcpAgent } from "../dist/acp-agent.js";
+import { agent as acpAgent, ndJsonStream } from "@agentclientprotocol/sdk/unstable";
+import { ClaudeAcpAgent, ClientConnection } from "../dist/acp-agent.js";
 import { createStubEngine, StubEngine, ENGINE_NOT_IMPLEMENTED_011 } from "../dist/engine.js";
 
 // Story 011 / Task 2 — the agent must boot end-to-end on a TEMPORARY no-op engine so
@@ -64,10 +64,11 @@ test("engine stub boot: stub work methods reject loudly (cut path is legible, no
   await assert.rejects(engine.prompt({}), isStubError);
 });
 
-test("engine stub boot: a live AgentSideConnection boots on the stub engine without throwing", async () => {
+test("engine stub boot: a live agent connection boots on the stub engine without throwing", async () => {
   // In-memory transport: an immediately-ended readable + a discarding writable. The
-  // agent factory runs on construction (per runAcp), so the agent is built on the
-  // stub; the ended input lets the connection close cleanly so the test can't hang.
+  // agent is built on the stub right after connect(), as runAcp builds it (story 071:
+  // ACP SDK 2.x removed AgentSideConnection); the ended input lets the connection close
+  // cleanly so the test can't hang.
   const endedInput = new ReadableStream<Uint8Array>({
     start(c) {
       c.close();
@@ -76,14 +77,15 @@ test("engine stub boot: a live AgentSideConnection boots on the stub engine with
   const discard = new WritableStream<Uint8Array>({ write() {} });
   const stream = ndJsonStream(discard, endedInput);
 
-  let built: ClaudeAcpAgent | undefined;
-  const connection = new AgentSideConnection((conn) => {
-    built = new ClaudeAcpAgent(conn, console, createStubEngine());
-    return built;
-  }, stream);
+  const connection = acpAgent().connect(stream);
+  const built: ClaudeAcpAgent | undefined = new ClaudeAcpAgent(
+    new ClientConnection(connection.client),
+    console,
+    createStubEngine(),
+  );
 
-  assert.ok(connection, "AgentSideConnection must construct over the stub-engine agent");
-  assert.ok(built, "the agent factory must run on connection construction");
+  assert.ok(connection, "the agent connection must open over the stub-engine agent");
+  assert.ok(built, "the agent must build over the live connection's client");
   assert.equal(built!.engine.kind, "stub", "the live connection's agent boots on the stub engine");
   await within(connection.closed, 2000);
 });

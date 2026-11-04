@@ -4,7 +4,8 @@ import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from "node:c
 import { readFileSync, accessSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ClientSideConnection, ndJsonStream } from "@agentclientprotocol/sdk";
+import { ndJsonStream } from "@agentclientprotocol/sdk/unstable";
+import { connectTestClient } from "./helpers/acp-client-connection.ts";
 import { nodeToWebReadable, nodeToWebWritable } from "../dist/utils.js";
 
 // Story 027 / Task 1.1 — build-and-bootstrap acceptance (R1.1, R1.3). Proves the
@@ -76,8 +77,7 @@ before(
 
     // READ-ONLY: an unexpected agent→client callback throws loudly. Only `initialize`
     // is exercised — no session/new, no session/prompt.
-    const connection = new ClientSideConnection(
-      () => ({
+    const connection = connectTestClient({
         async requestPermission() {
           throw new Error("unexpected client callback during read-only bootstrap");
         },
@@ -88,7 +88,7 @@ before(
         async readTextFile() {
           return { content: "" };
         },
-      }),
+      },
       stream,
     );
 

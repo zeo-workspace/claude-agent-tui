@@ -19,7 +19,10 @@
 // injectable client surface so a unit test runs it OFFLINE against a fake client. It imports NOTHING
 // internal, and only `import type` from the SDK — the runtime zod validators are NOT importable here
 // (the package `exports` map blocks the deep specifier), so every guard below is STRUCTURAL.
-import type { CreateElicitationRequest, CreateElicitationResponse } from "@agentclientprotocol/sdk";
+import type {
+  CreateElicitationRequest,
+  CreateElicitationResponse,
+} from "@agentclientprotocol/sdk/unstable";
 
 /**
  * The gate decision this bridge yields. Mirrors hook-server's `DenyWithReason`: AskUserQuestion is

@@ -40,6 +40,10 @@ const sdkRoot = join(forkRoot, "node_modules", "@agentclientprotocol", "sdk");
 // in the SDK, and this adapter sends none of them. The same range stabilised
 // `notice` and `compaction_update` (their UNSTABLE markers were dropped) and reshaped
 // `IdleStateUpdate`/`ErrorStopReason`, neither of which this tree references.
+// The 1.8.0 → 2.4.0 bump (story 071, 2026-11-04, upstream 720bbb3e) changes NO variant:
+// ADDED=[], REMOVED=[]. It splits the package into a stable and an unstable v1 entry and
+// removes `AgentSideConnection`/`ClientSideConnection`; this tree imports the unstable entry,
+// so the union is read from `dist/v1/unstable/schema/types.gen.d.ts`.
 const EXPECTED_VARIANTS = [
   "user_message_chunk",
   "agent_message_chunk",
@@ -62,9 +66,9 @@ const EXPECTED_VARIANTS = [
   "session_message_chunk",
 ];
 
-test("session update union: the ACP SDK is pinned to 1.8.0", () => {
+test("session update union: the ACP SDK is pinned to 2.4.0", () => {
   const pkg = JSON.parse(readFileSync(join(sdkRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "1.8.0", "the ACP schema/transport SDK is pinned at 1.8.0");
+  assert.equal(pkg.version, "2.4.0", "the ACP schema/transport SDK is pinned at 2.4.0");
 });
 
 test("session update union: SessionUpdate is not redefined or shadowed in fork src", () => {
@@ -78,8 +82,11 @@ test("session update union: SessionUpdate is not redefined or shadowed in fork s
   }
 });
 
-test("session update union: variant set matches SDK 1.8.0 (no unexpected shape drift)", () => {
-  const dts = readFileSync(join(sdkRoot, "dist", "schema", "types.gen.d.ts"), "utf8");
+test("session update union: variant set matches SDK 2.4.0 (no unexpected shape drift)", () => {
+  const dts = readFileSync(
+    join(sdkRoot, "dist", "v1", "unstable", "schema", "types.gen.d.ts"),
+    "utf8",
+  );
   const declIdx = dts.indexOf("export type SessionUpdate =");
   assert.ok(declIdx !== -1, "SessionUpdate union must be defined in the SDK type surface");
   // The union spans until the next top-level declaration; slice that window only.
@@ -90,7 +97,7 @@ test("session update union: variant set matches SDK 1.8.0 (no unexpected shape d
   assert.deepEqual(
     [...found].sort(),
     [...EXPECTED_VARIANTS].sort(),
-    "the SessionUpdate discriminated-union variant set drifted from the expected 1.8.0 set",
+    "the SessionUpdate discriminated-union variant set drifted from the expected 2.4.0 set",
   );
 });
 
