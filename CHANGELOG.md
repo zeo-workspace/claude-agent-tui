@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.17.0](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.5...v0.17.0) (2026-11-04)
+
+
+### Added
+
+* **071:** tui on ACP SDK 2.x, agent SDK 0.3.31x, @anthropic-ai/sdk 1.x ([e619cd8](https://github.com/zeo-workspace/claude-agent-tui/commit/e619cd8cf22fb8c6b7e8c361554f0cdabf968bde))
+
+
+### Infrastructure
+
+* **071:** release as 0.17.0 ([#167](https://github.com/zeo-workspace/claude-agent-tui/issues/167)) ([00c10f9](https://github.com/zeo-workspace/claude-agent-tui/commit/00c10f9db36110749e1eead719f6370c9de6ca84))
+
 ## [0.16.5](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.16.4...v0.16.5) (2026-11-02)
 
 
