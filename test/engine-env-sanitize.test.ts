@@ -54,3 +54,15 @@ test("env: FORBIDDEN_BILLING_VARS is exactly the four documented keys", () => {
     ].sort(),
   );
 });
+
+// Zeo next §4.3 — without CLAUDE_CODE_ENABLE_TODO_TOOLS the CLI enables its task tools only on
+// legacy models (upstream claude-agent-acp #1380), so on Opus 5.x the tui showed no plan.
+test("env: CLAUDE_CODE_ENABLE_TODO_TOOLS is turned on when the base env does not set it", () => {
+  const env = buildSanitizedEnv(taintedBase());
+  assert.equal(env.CLAUDE_CODE_ENABLE_TODO_TOOLS, "1");
+});
+
+test("env: an operator's own CLAUDE_CODE_ENABLE_TODO_TOOLS value wins, even when it is off", () => {
+  const env = buildSanitizedEnv({ ...taintedBase(), CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" });
+  assert.equal(env.CLAUDE_CODE_ENABLE_TODO_TOOLS, "0");
+});

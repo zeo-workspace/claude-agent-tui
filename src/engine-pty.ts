@@ -40,9 +40,13 @@ export const FORBIDDEN_BILLING_VARS = [
   "CLAUDE_AGENT_SDK_CLIENT_APP",
 ] as const;
 
+/** Opts the CLI into its task tools on every model; see {@link buildSanitizedEnv}. */
+export const TODO_TOOLS_ENV = "CLAUDE_CODE_ENABLE_TODO_TOOLS";
+
 /**
  * Build the sanitized spawn env (§5/§10): spread the base env, set the three terminal vars
- * (`TERM`/`COLORTERM`/`FORCE_COLOR`), then delete the four {@link FORBIDDEN_BILLING_VARS}.
+ * (`TERM`/`COLORTERM`/`FORCE_COLOR`), delete the four {@link FORBIDDEN_BILLING_VARS}, and turn
+ * {@link TODO_TOOLS_ENV} on unless the base env already sets it.
  *
  * This is the SINGLE shared definition every spawn path reuses — this story's spawn and
  * story 014's `--resume` — so the deletions never drift across two hand-copied blocks
@@ -60,6 +64,10 @@ export function buildSanitizedEnv(
   for (const key of FORBIDDEN_BILLING_VARS) {
     delete env[key];
   }
+  // The CLI enables its task tools only on legacy models unless this is set (upstream
+  // claude-agent-acp #1380), so on Opus 5.x the tui would translate no plan at all. Plus
+  // injects it the same way (plan-updates.ts); a value the operator already set wins.
+  env[TODO_TOOLS_ENV] ??= "1";
   return env;
 }
 

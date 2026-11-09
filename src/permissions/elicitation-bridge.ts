@@ -47,9 +47,9 @@ export interface AskUserQuestionInput {
 }
 
 /**
- * The minimal ACP client surface the bridge needs — structurally satisfied by the kept
- * `AgentSideConnection` (`client.createElicitation(params)`). Injected so a unit test drives
- * the bridge with a fake client OFFLINE (no AgentSideConnection, no Zed).
+ * The minimal ACP client surface the bridge needs — structurally satisfied by the agent's
+ * `AcpClient` (`client.createElicitation(params)`). Injected so a unit test drives
+ * the bridge with a fake client OFFLINE (no ACP connection, no Zed).
  */
 export interface ElicitationClient {
   createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
