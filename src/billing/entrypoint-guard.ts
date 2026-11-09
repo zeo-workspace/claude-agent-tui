@@ -35,6 +35,13 @@
 //
 // SOURCE: doc §10 "Auditoria de billing — entrypoint", reverse-engineered from `claude` binary
 // 2.1.159. If the binary version changes, re-audit these two sets against the new binary.
+//
+// RE-AUDITED 2026-11-09 against `claude` 2.1.319 (`strings`, the entrypoint table and the SDK
+// predicate): the SDK class is still exactly sdk-ts / sdk-py / sdk-cli, and cli, claude-vscode
+// and local-agent still exist. Labels added since (mcp, bench, claude-desktop, remote*,
+// ssh-remote, claude-coworker*, claude-in-slack/teams, claude-security) are in neither set, so
+// they classify 'unknown' and stay blocked. vscode, jetbrains and firstParty no longer appear in
+// the binary; they are kept, since no current label can match them. No set changed.
 
 /**
  * §10 SUBSCRIPTION set (OK) — client labels that bill on the Claude subscription.
