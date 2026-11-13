@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.17.3](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.17.2...v0.17.3) (2026-11-13)
+
+
+### Infrastructure
+
+* **deps:** bump @babel/runtime from 7.29.10 to 7.29.14 ([#178](https://github.com/zeo-workspace/claude-agent-tui/issues/178)) ([5cc238d](https://github.com/zeo-workspace/claude-agent-tui/commit/5cc238d9154efcef7fe5d14f6721378fb67c7c94))
+* **deps:** bump github/codeql-action/upload-sarif ([#174](https://github.com/zeo-workspace/claude-agent-tui/issues/174)) ([13a4165](https://github.com/zeo-workspace/claude-agent-tui/commit/13a41655575098aba14011067695a5b214559b72))
+* **deps:** bump sigstore/cosign-installer from 4.1.2 to 4.1.3 ([#176](https://github.com/zeo-workspace/claude-agent-tui/issues/176)) ([f64e257](https://github.com/zeo-workspace/claude-agent-tui/commit/f64e25728229d2e0e93ffd276b1504401524102d))
+* **deps:** bump the minor group with 9 updates ([#177](https://github.com/zeo-workspace/claude-agent-tui/issues/177)) ([45fd20a](https://github.com/zeo-workspace/claude-agent-tui/commit/45fd20a91fadf0c24e262a364e379e814b1a491f))
+* **deps:** bump trufflesecurity/trufflehog from 3.99.7 to 3.99.8 ([#175](https://github.com/zeo-workspace/claude-agent-tui/issues/175)) ([4b12adf](https://github.com/zeo-workspace/claude-agent-tui/commit/4b12adf8fe9da751e45f51b8b709188b7782e26d))
+
 ## [0.17.2](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.17.1...v0.17.2) (2026-11-09)
 
 
