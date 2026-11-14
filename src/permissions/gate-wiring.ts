@@ -33,8 +33,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { findFreePort } from "../gate/port.js";
-import { injectHook, restore, type Backup } from "../gate/settings-writer.js";
 import {
+  DEFAULT_HOOK_TIMEOUT_SECONDS,
+  injectHook,
+  restore,
+  type Backup,
+} from "../gate/settings-writer.js";
+import {
+  deciderBudgetMs,
   startHookServer,
   type ForwardedToolCall,
   type HookServer,
@@ -387,7 +393,11 @@ class SessionGateImpl implements SessionGate {
     this.server = await startHookServer({
       port: this.port,
       token: this.token,
-      deciderTimeoutMs: this.opts.deciderTimeoutMs,
+      // Item 226: always under the hook timeout written below, so the deny reaches claude first.
+      deciderTimeoutMs: deciderBudgetMs(
+        this.opts.hookTimeoutSeconds ?? DEFAULT_HOOK_TIMEOUT_SECONDS,
+        this.opts.deciderTimeoutMs,
+      ),
       onWarn: (m) => this.warn(m),
       onToolCall: (call) => this.decide(call),
     });

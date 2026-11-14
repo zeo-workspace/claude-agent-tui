@@ -21,7 +21,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { appendFileSync } from "node:fs";
 import { LOOPBACK_HOST } from "../gate/port.js";
-import { FORK_HOOK_MARKER_PATH } from "../gate/settings-writer.js";
+import { DEFAULT_HOOK_TIMEOUT_SECONDS, FORK_HOOK_MARKER_PATH } from "../gate/settings-writer.js";
 import { allowDecision, denyDecision, type HookResponse } from "./deny.js";
 
 /** The §9 `PreToolUse` http payload shape (GATE_FINDINGS keystone 1.3). All fields optional on parse
@@ -103,8 +103,29 @@ export interface StartHookServerOptions {
   token?: string;
 }
 
-/** Default decider timeout (ms) — long enough for an async Zed decision relay, short of a hang. */
-export const DEFAULT_DECIDER_TIMEOUT_MS = 600_000;
+/** Time left between the decider's deny and claude giving up on the hook, so the deny crosses
+ *  loopback first. Item 226: when claude's hook timer wins, it falls back to its own permission flow,
+ *  and an allow rule or auto mode then runs the tool with nobody deciding (CLI 2.1.319 and 2.1.325,
+ *  measured 2026-11-14). The decider used to wait exactly as long as the hook, and always lost. */
+export const HOOK_DEADLINE_MARGIN_MS = 15_000;
+
+/**
+ * The decider's budget for a hook of `hookTimeoutSeconds`: whatever was requested, but never past the
+ * hook's deadline minus the margin (half the hook, for a hook shorter than twice the margin). A
+ * requested budget can only shorten it, so no caller can reopen item 226.
+ */
+export function deciderBudgetMs(
+  hookTimeoutSeconds: number,
+  requestedMs: number | undefined,
+): number {
+  const hookMs = hookTimeoutSeconds * 1000;
+  const ceiling = hookMs - Math.min(HOOK_DEADLINE_MARGIN_MS, hookMs / 2);
+  return Math.min(requestedMs ?? ceiling, ceiling);
+}
+
+/** Default decider timeout (ms) — the default hook's budget: long enough for a person to answer in
+ *  Zed, and over before claude would give up on the hook. */
+export const DEFAULT_DECIDER_TIMEOUT_MS = deciderBudgetMs(DEFAULT_HOOK_TIMEOUT_SECONDS, undefined);
 
 /** Read a request body fully into a UTF-8 string (bounded by Node's own socket limits). */
 function readBody(req: IncomingMessage): Promise<string> {
