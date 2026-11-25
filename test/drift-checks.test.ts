@@ -28,6 +28,7 @@ import {
   KNOWN_NONTERMINAL_STOP_REASONS,
   REQUIRED_JSONL_KEYS,
   EXPECTED_ALLOW_KEYSTROKE,
+  KNOWN_JSONL_KEYS,
 } from "../src/drift-checks.ts";
 
 /** A minimal valid RAW-shape event line (the on-disk shape, camelCase), overridable per test. */
@@ -154,4 +155,12 @@ test("REQUIRED_JSONL_KEYS is the core every event line must carry", () => {
 
 test("EXPECTED_ALLOW_KEYSTROKE mirrors allow-inject.ts KEYSTROKE_YES", () => {
   assert.equal(EXPECTED_ALLOW_KEYSTROKE, "1\r");
+});
+
+test("checkJsonlShape knows the top-level keys claude 2.1.330 writes (parity round 26)", () => {
+  // Measured 2026-11-25 on local 2.1.330 transcripts: these keys appear on ordinary lines.
+  for (const key of ["dataFlowOn", "requestedModel", "permissionDecision", "toolDenialKind", "session_id"]) {
+    assert.ok(KNOWN_JSONL_KEYS.has(key), `${key} is a known key`);
+  }
+  assert.equal(KNOWN_JSONL_KEYS.has("aKeyNoClaudeVersionWrites"), false, "an unknown key is still drift");
 });
