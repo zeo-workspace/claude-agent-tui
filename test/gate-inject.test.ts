@@ -80,3 +80,33 @@ test("3.1 a user's own PreToolUse hook in an existing file is preserved through 
   assert.equal(pre.length, 2, "user hook + fork hook on disk");
   assert.deepEqual(pre[0], userHook, "the user's own hook survives inject verbatim");
 });
+
+test("renderer: injectHook writes the top-level tui key only when asked", async (t) => {
+  const dir = await tmpDir();
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const pinned = path.join(dir, "pinned.json");
+  await SW.injectHook({ settingsPath: pinned, port: 51001, renderer: SW.SCRATCH_RENDERER });
+  const onDisk = JSON.parse(await fs.readFile(pinned, "utf8"));
+  assert.equal(onDisk.tui, "default", "the scratch settings pin the classic renderer");
+
+  const plain = path.join(dir, "plain.json");
+  await SW.injectHook({ settingsPath: plain, port: 51002 });
+  assert.equal(JSON.parse(await fs.readFile(plain, "utf8")).tui, undefined, "no renderer key unless asked");
+});
+
+test("renderer: restore takes the injected tui key back out (created file deleted, prior value back)", async (t) => {
+  const dir = await tmpDir();
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const created = path.join(dir, "created.json");
+  const b1 = await SW.injectHook({ settingsPath: created, port: 51003, renderer: SW.SCRATCH_RENDERER });
+  await SW.restore(b1);
+  await assert.rejects(fs.readFile(created, "utf8"), /ENOENT/, "a file the fork created leaves no residue");
+
+  const existing = path.join(dir, "existing.json");
+  await fs.writeFile(existing, JSON.stringify({ tui: "fullscreen", model: "x" }) + "\n", "utf8");
+  const b2 = await SW.injectHook({ settingsPath: existing, port: 51004, renderer: SW.SCRATCH_RENDERER });
+  await SW.restore(b2);
+  const back = JSON.parse(await fs.readFile(existing, "utf8"));
+  assert.equal(back.tui, "fullscreen", "the user's own renderer comes back");
+  assert.equal(back.model, "x");
+});

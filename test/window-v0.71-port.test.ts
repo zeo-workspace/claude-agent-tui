@@ -100,8 +100,8 @@ test("R5.2 the Fable fallback row names its concrete version, in title AND descr
   // live rows arrive that way and a curated prefix prepended to them produced doubled
   // copy. So the assertion moved from the removed label map onto the row itself.
   const entry = MODEL_CATALOG.find((m) => m.value === "fable");
-  assert.match(entry?.displayName ?? "", /Fable 5\.1/);
-  assert.match(entry?.description ?? "", /Fable 5\.1/);
+  assert.match(entry?.displayName ?? "", /Fable 5\.2/);
+  assert.match(entry?.description ?? "", /Fable 5\.2/);
 });
 
 test("R5.2 Fable 5.1's window is declared in BOTH tables, which are not the same table", () => {
@@ -117,6 +117,8 @@ test("R5.2 Fable 5.1's window is declared in BOTH tables, which are not the same
       "turn's actual `model` field in the JSONL. Seeding only the alias leaves the refinement " +
       "step with no entry, so the correction silently does not happen",
   );
+  // CLI 2.1.321 moved `fable` to Fable 5.2; the ID table must know the id the alias now sends.
+  assert.equal(MODEL_ID_CONTEXT_WINDOWS["claude-fable-5-2"], 1_000_000);
 });
 
 // ---- R7.3 — `#1079`'s reachable half: pure credential classification ------------------------

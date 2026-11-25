@@ -37,6 +37,7 @@ import {
   DEFAULT_HOOK_TIMEOUT_SECONDS,
   injectHook,
   restore,
+  SCRATCH_RENDERER,
   type Backup,
 } from "../gate/settings-writer.js";
 import {
@@ -410,6 +411,7 @@ class SessionGateImpl implements SessionGate {
         port: this.port,
         token: this.token,
         timeout: this.opts.hookTimeoutSeconds,
+        renderer: SCRATCH_RENDERER,
       });
     } catch (err) {
       // The settings write failed AFTER the server bound — close it before surfacing, so a failed
