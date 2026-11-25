@@ -171,6 +171,7 @@ import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gat
 import { translateMcpServers, writeMcpScratch, removeMcpScratch } from "./mcp-config-writer.js";
 import { materializeImage, cleanupMaterializedImages } from "./image-input.js";
 import { deleteSessionIfStored } from "./session-delete.js";
+import { AddDirTrustWatcher, DEFAULT_TRUST_SETTLE_MS } from "./add-dir-trust.js";
 
 export const CLAUDE_CONFIG_DIR =
   process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
@@ -285,6 +286,12 @@ type Session = {
    * is the RAW list (per-dir sanitization is the engine's job); absent on pre-057 / replay records.
    */
   additionalDirectories?: string[];
+  /**
+   * Parity round 26 (item 238): watches the claude PTY for the `--add-dir` trust dialog, which
+   * claude 2.1.326+ opens for a folder it does not trust yet. Asked at the first prompt, because the
+   * client does not know the session id during `session/new`. Absent when the session added no folder.
+   */
+  addDirTrust?: AddDirTrustWatcher;
   /**
    * Story 057 (R2.3/R2.4, sub-task 2.3) — the CURRENT MCP scratch path ({@link writeMcpScratch})
    * threaded into this session's spawn as `--mcp-config "<file>"`. Retained so {@link teardownSession}
@@ -497,6 +504,12 @@ export interface StartedEngine {
 export interface StartEngineArgs {
   /** Requested session id (resume/fork). Undefined for a fresh session (engine generates it). */
   sessionId?: string;
+  /**
+   * Parity round 26 (item 238): called with the claude PTY the instant it is spawned, before any
+   * await. node-pty does not buffer output for a listener that attaches later, and claude draws its
+   * `--add-dir` trust dialog once, early: a tap attached after the model catalogue read would miss it.
+   */
+  onSpawn?: (pty: IPty) => void;
   /** Host working directory the TUI spawns in. */
   cwd: string;
   /** True when reattaching to a prior session (story 014 robust resume argv). */
@@ -893,6 +906,7 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
       // carries `--mcp-config "<file>"`; respawnSession regenerates the scratch before this call.
       mcpConfigFile: args.mcpConfigFile,
     });
+    args.onSpawn?.(handle.pty);
     if (args.inPlaceRespawn) {
       // === SEAM(046 R3.4 LIVE FIX): DEFER discovery for an in-place re-spawn ======================
       // An in-place re-spawn (respawnSession: dontAsk/bypass or effort) can fire BEFORE the first
@@ -987,6 +1001,7 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     // servers declared) keeps the pre-057 argv byte-for-byte.
     mcpConfigFile: args.mcpConfigFile,
   });
+  args.onSpawn?.(engine.pty);
 
   // Hand the engine the cancellation handle for the background poll. STORE-ONLY here — the
   // cleanup→`.abort()` wiring (so tearing a never-interacted session down cancels this dangling poll)
@@ -2061,6 +2076,11 @@ export class ClaudeAcpAgent {
       );
     }
 
+    // Parity round 26 (item 238): answer an open `--add-dir` trust dialog before anything is typed,
+    // or the prompt would land in the dialog. Awaited only while a watcher is live, so a session
+    // with no added folder keeps the synchronous submit below (R2.3).
+    if (sessionRecord.addDirTrust) await this.resolveAddDirTrust(params.sessionId, sessionRecord);
+
     // === SEAM(030) — Degrau-2 ACP-side input (R1, R1.2, R5, R5.1, R5.2). The Degrau-1 read-only
     // no-op is replaced by the real prompt loop: assemble the §8 PTY payload, submit it, and resolve
     // the pending `session/prompt` SOLELY through the story-024 end-of-turn detector — never by this
@@ -2773,7 +2793,11 @@ export class ClaudeAcpAgent {
       // Re-spawn through the SAME startEngine seam createSession uses, reusing the sessionId so the
       // transcript is reattached on resume (R3.4) or freshly created on the pre-interaction path; the
       // flags flow into the flag-carrying spawn argv (fresh `buildClaudeCmd` or `buildResumeArgv`).
+      let addDirTrust: AddDirTrustWatcher | undefined;
       const started = await this.startEngine({
+        onSpawn: (pty) => {
+          addDirTrust = this.watchAddDirTrust(pty, session.additionalDirectories);
+        },
         sessionId,
         cwd: session.cwd,
         resume: !fresh,
@@ -2800,11 +2824,82 @@ export class ClaudeAcpAgent {
       session.pty = started.pty;
       session.engine = started.engine;
       session.watcher = started.watcher;
+      session.addDirTrust?.dispose();
+      session.addDirTrust = addDirTrust;
       if (change.permissionMode) {
         session.modes = { ...session.modes, currentModeId: change.permissionMode };
       }
     } finally {
       session.respawning = false;
+    }
+  }
+
+  /** Parity round 26 (item 238): a trust-dialog watcher for a PTY started with `--add-dir` folders. */
+  private watchAddDirTrust(pty: IPty, dirs: string[] | undefined): AddDirTrustWatcher | undefined {
+    if (!dirs || dirs.length === 0) return undefined;
+    return new AddDirTrustWatcher(pty, dirs, os.homedir());
+  }
+
+  /**
+   * Parity round 26 (item 238): ask the client about each folder claude's trust dialog names, then
+   * answer it. Yes types `2` and claude goes on; No (or a cancelled request) starts claude again
+   * without that folder, through the same pre-interaction re-spawn a mode change uses, because
+   * claude's own "No, exit" ends the process. Refusing is never silent: it is logged and the folder
+   * leaves the session's scope. Bounded by the folder count, since each round settles one folder.
+   */
+  private async resolveAddDirTrust(sessionId: string, session: Session): Promise<void> {
+    const rounds = (session.additionalDirectories?.length ?? 0) + 1;
+    for (let round = 0; round < rounds; round++) {
+      const watcher = session.addDirTrust;
+      if (!watcher) return;
+      await watcher.settled(DEFAULT_TRUST_SETTLE_MS, this.schedule);
+      const dir = watcher.pending();
+      if (!dir) {
+        if (watcher.done()) session.addDirTrust = undefined;
+        return;
+      }
+      const trust = await this.askAddDirTrust(sessionId, dir);
+      if (trust) {
+        watcher.answer(true);
+        continue;
+      }
+      this.logger.error(
+        `[add-dir] sessionId=${sessionId} event=refused dir=${JSON.stringify(dir)} ` +
+          "action=restart-without-dir",
+      );
+      watcher.dispose();
+      session.addDirTrust = undefined;
+      session.additionalDirectories = (session.additionalDirectories ?? []).filter(
+        (d) => d !== dir,
+      );
+      await this.respawnSession(sessionId, session, {});
+    }
+  }
+
+  /** Parity round 26 (item 238): one permission request for one folder of the trust dialog. */
+  private async askAddDirTrust(sessionId: string, dir: string): Promise<boolean> {
+    try {
+      const result = await this.client.requestPermission({
+        sessionId,
+        toolCall: {
+          toolCallId: `add-dir-trust-${randomUUID()}`,
+          title: `Trust ${dir} for this session?`,
+          kind: "other",
+          status: "pending",
+          rawInput: { directory: dir },
+        },
+        options: [
+          { optionId: "trust", name: "Yes, add it", kind: "allow_once" },
+          { optionId: "refuse", name: "No, start without it", kind: "reject_once" },
+        ],
+      });
+      return result.outcome.outcome === "selected" && result.outcome.optionId === "trust";
+    } catch (error) {
+      this.logger.error(
+        `[add-dir] sessionId=${sessionId} event=ask-failed dir=${JSON.stringify(dir)}:`,
+        error,
+      );
+      return false;
     }
   }
 
@@ -4011,8 +4106,12 @@ export class ClaudeAcpAgent {
     // resume/fork we hand it the requested id. A failed resume (transcript never found by the
     // file-discovery watchdog) surfaces as resourceNotFound so the client can recover.
     let started: StartedEngine;
+    let addDirTrust: AddDirTrustWatcher | undefined;
     try {
       started = await this.startEngine({
+        onSpawn: (pty) => {
+          if (!creationOpts.replayOnly) addDirTrust = this.watchAddDirTrust(pty, additionalDirs);
+        },
         sessionId: isResume || creationOpts.forkSession ? requestedSessionId : undefined,
         cwd: params.cwd,
         resume: isResume || !!creationOpts.forkSession,
@@ -4153,6 +4252,7 @@ export class ClaudeAcpAgent {
       // Story 057 (R1.3): the resolved additional-directory list, stored so sub-task 2.3's
       // respawnSession can re-thread the SAME `--add-dir` scope into the in-place re-spawn.
       additionalDirectories: additionalDirs,
+      addDirTrust,
       // Story 057 (R2.3/R2.4): the CURRENT MCP scratch path (for teardown removal + re-spawn regen)
       // and the RAW ACP server array (so respawnSession can re-translate + regenerate the scratch).
       mcpConfigFile,
