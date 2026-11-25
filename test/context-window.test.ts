@@ -98,10 +98,10 @@ test("069 R3: the fallback rows are SELF-CONTAINED — version plus the picker's
   assert.equal(byValue.sonnet.description, "Sonnet 5.5 with 1M context · Most efficient for simpler tasks");
   assert.equal(byValue.haiku.displayName, "Haiku 5.5");
   assert.equal(byValue.haiku.description, "Haiku 5.5 with 1M context · Fastest for quick answers");
-  assert.equal(byValue.fable.displayName, "Fable 5.1");
+  assert.equal(byValue.fable.displayName, "Fable 5.2");
   assert.equal(
     byValue.fable.description,
-    "Fable 5.1 with 1M context · Most capable for your hardest and longest-running tasks",
+    "Fable 5.2 with 1M context · Most capable for your hardest and longest-running tasks",
   );
   // `default` carries the Opus text (default = recommended Opus).
   assert.equal(
@@ -124,7 +124,7 @@ test("072: modelSelectorDescription prepends the version/context label to the ta
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.fable),
-    "Fable 5.1 with 1M context · Most capable for your hardest and longest-running tasks",
+    "Fable 5.2 with 1M context · Most capable for your hardest and longest-running tasks",
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.sonnet),

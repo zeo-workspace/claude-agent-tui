@@ -36,6 +36,14 @@ export const FORK_HOOK_MARKER_KEY = "__forkAcpGate";
 /** Default hook timeout in SECONDS (claude default is 600); kept a parameter so nothing is magic. */
 export const DEFAULT_HOOK_TIMEOUT_SECONDS = 600;
 
+/**
+ * Renderer pinned in the per-session scratch settings. The native-prompt markers the gate and the
+ * PTY reader match were measured on the classic renderer; a user file selecting `"tui":
+ * "fullscreen"` would otherwise draw the PTY claude on the alternate screen. The `--settings`
+ * layer outranks the user file, so pinning it here wins.
+ */
+export const SCRATCH_RENDERER = "default";
+
 /** Tool matcher for the gate hook; `"*"` matches all tools (the shape the story-007 probe fired). */
 export const FORK_HOOK_MATCHER = "*";
 
@@ -44,6 +52,15 @@ export interface HttpHookEntry {
   type: "http";
   url: string;
   timeout: number;
+  /**
+   * What claude does when the hook cannot answer: a dead or unreachable server, a timeout, a
+   * malformed reply, or a loopback URL that a managed `allowedHttpHookUrls` refuses. Without
+   * `"block"` claude treats such a hook as not having answered and hands the call to its own
+   * permission flow, where an allow rule or auto mode can run it with nobody deciding (CLI
+   * 2.1.330 strings: a failing hook counts as a block only "where onFailure is 'block'";
+   * supported for http hooks since CLI 2.1.295). The gate must fail closed, so it is always set.
+   */
+  onFailure: "block";
 }
 
 /** The `{ matcher, hooks:[…] }` group as it appears under `PreToolUse`, plus the fork sentinel key. */
@@ -103,6 +120,7 @@ export function buildHookEntry(
         type: "http",
         url: `http://127.0.0.1:${port}${FORK_HOOK_MARKER_PATH}${tokenSuffix}`,
         timeout,
+        onFailure: "block",
       },
     ],
     [FORK_HOOK_MARKER_KEY]: true,
@@ -233,6 +251,8 @@ export interface Backup {
   existed: boolean;
   /** The exact prior file bytes (only when `existed` is true). */
   priorBytes: Buffer | null;
+  /** The `tui` value {@link injectHook} wrote, so {@link restore} can take it back out. */
+  injectedRenderer?: string;
 }
 
 /** Result of {@link restore}: which removal path ran (`'surgical'` preferred, `'backup'` fallback). */
@@ -322,8 +342,10 @@ export async function injectHook(opts: {
   timeout?: number;
   /** Story 055 (R1.3) — per-session token bound into the hook URL after {@link FORK_HOOK_MARKER_PATH}. */
   token?: string;
+  /** When given, written as the top-level `tui` key (see {@link SCRATCH_RENDERER}). */
+  renderer?: string;
 }): Promise<Backup> {
-  const { settingsPath, port, timeout, token } = opts;
+  const { settingsPath, port, timeout, token, renderer } = opts;
 
   // 1) Snapshot the prior state (bytes or absence) — captured BEFORE any mutation (R4.1).
   const priorBytes = await readPriorBytes(settingsPath);
@@ -338,6 +360,10 @@ export async function injectHook(opts: {
     prior = text.length === 0 ? null : parsePriorSettings(text);
   }
   const merged = mergeHook(prior, group);
+  if (renderer !== undefined) {
+    merged.tui = renderer;
+    backup.injectedRenderer = renderer;
+  }
   const out = `${JSON.stringify(merged, null, 2)}\n`;
 
   // 3) Durably write BEFORE returning control to the spawn path (R3.1, R3.2). On failure, roll back
@@ -430,6 +456,18 @@ export async function restore(backup: Backup): Promise<RestoreResult> {
       }
       if (Object.keys(hooks).length === 0) {
         delete next.hooks;
+      }
+    }
+
+    // Take back the renderer inject wrote, unless the key has been changed since: the prior value
+    // when the file had one, else nothing. Left in place, it would keep a created file alive.
+    if (backup.injectedRenderer !== undefined && next.tui === backup.injectedRenderer) {
+      const priorText = backup.priorBytes?.toString("utf8").trim() ?? "";
+      const priorTui = priorText.length === 0 ? undefined : parsePriorSettings(priorText).tui;
+      if (priorTui === undefined) {
+        delete next.tui;
+      } else {
+        next.tui = priorTui;
       }
     }
 

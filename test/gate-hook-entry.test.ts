@@ -48,3 +48,10 @@ test("2.1 an invalid port throws (no malformed/ungated hook is ever produced)", 
     );
   }
 });
+
+test("the hook fails closed: onFailure is \"block\" (a dead server must not hand the call to claude's own flow)", () => {
+  // CLI 2.1.330: a failing http hook counts as a block only where onFailure is "block"; without it a
+  // dead, unreachable or malformed hook leaves the call to claude's allow rules / auto mode.
+  assert.equal(SW.buildHookEntry(45678).hooks[0].onFailure, "block");
+  assert.equal(SW.buildHookEntry(45678, { token: "t", timeout: 30 }).hooks[0].onFailure, "block");
+});

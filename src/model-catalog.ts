@@ -85,15 +85,16 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "fable",
     // The title carries the concrete version, matching the live CLI rows this list stands in for.
-    displayName: "Fable 5.1",
-    // The tier alias, PROBED not guessed: `--model fable` resolves to `claude-fable-5-1` on a real
-    // turn (2026-09-23). It replaces the `fable51`/`fable5` rows, which the CLI rejected outright —
+    displayName: "Fable 5.2",
+    // The tier alias, PROBED not guessed: `--model fable` resolved to `claude-fable-5-1` on a real
+    // turn (2026-09-23), and to `claude-fable-5-2` since CLI 2.1.321 (4872 transcript lines on this
+    // host name `claude-fable-5-2`, measured 2026-11-24 on CLI 2.1.330). It replaces the `fable51`/`fable5` rows, which the CLI rejected outright —
     // see the closed-set note on MODEL_CATALOG above.
     // The description is the same string the live `/model` picker shows for the top of the
-    // family — the CLI ships exactly three taglines and none is 5.1-specific, so this is
+    // family — the CLI ships exactly three taglines and none is version-specific, so this is
     // verbatim rather than invented.
     description:
-      "Fable 5.1 with 1M context · Most capable for your hardest and longest-running tasks",
+      "Fable 5.2 with 1M context · Most capable for your hardest and longest-running tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
@@ -139,7 +140,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
  *
  * `sonnet` seeds to 1M because plain `sonnet` now resolves to Sonnet 5, which is natively 1M (the
  * redundant `sonnet[1m]` alias was dropped). `default` and `opus` both resolve to Opus 5.5 and `fable`
- * to Fable 5.1 — all three natively 1M per the CLI's baked-in catalogue. This is only the
+ * to Fable 5.2 — all three natively 1M per the CLI's baked-in catalogue. This is only the
  * PRE-FIRST-TURN seed: once a turn arrives, `inferContextWindowFromModelId` (story 069) AUTHORITATIVELY
  * refines the window from the transcript's real `model`. Keys MIRROR `MODEL_CATALOG` `value`s; the drift
  * guard lives in the test (068 anti-drift: every catalog value has an explicit entry).
@@ -170,6 +171,8 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-opus-4-8": 1_000_000,
   "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 200_000,
+  // CLI 2.1.330's catalogue: `claude-fable-5-2` is `window: 1e6, native_1m: true`.
+  "claude-fable-5-2": 1_000_000,
   "claude-fable-5-1": 1_000_000,
   "claude-fable-5": 1_000_000,
   "claude-sonnet-5-5": 1_000_000,

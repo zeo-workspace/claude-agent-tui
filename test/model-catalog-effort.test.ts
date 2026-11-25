@@ -57,7 +57,7 @@ test("catalog order + membership: default, fable, opus, sonnet, haiku", () => {
   assert.equal(byVal("default").displayName, "Default (recommended)", "default label carries (recommended)");
   assert.equal(
     byVal("fable").displayName,
-    "Fable 5.1",
+    "Fable 5.2",
     "fallback rows name their concrete version, the way the live CLI rows do",
   );
 });
