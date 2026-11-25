@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp). The upstream tag it currently vendors is the `tag` field of [`.fork-provenance.json`](.fork-provenance.json) — first v0.39.0, re-anchored since; no version is repeated here, because a copy is what went stale.
 
+## [0.17.6](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.17.5...v0.17.6) (2026-11-25)
+
+
+### Infrastructure
+
+* **deps:** bump @babel/runtime from 7.29.13 to 7.29.14 ([#186](https://github.com/zeo-workspace/claude-agent-tui/issues/186)) ([9016a27](https://github.com/zeo-workspace/claude-agent-tui/commit/9016a278a9f14d55230ba1d19cd5a110fcf19f5d))
+* **deps:** bump encodeurl from 2.0.1 to 2.0.3 ([#187](https://github.com/zeo-workspace/claude-agent-tui/issues/187)) ([bef9847](https://github.com/zeo-workspace/claude-agent-tui/commit/bef984796e15f7ab5e1eea57bfdca8e640a0c8b8))
+* **deps:** bump google/osv-scanner-action/osv-scanner-action ([#183](https://github.com/zeo-workspace/claude-agent-tui/issues/183)) ([d560061](https://github.com/zeo-workspace/claude-agent-tui/commit/d56006191d521669905e36f1faa3773b8d039fd6))
+* **deps:** bump the minor group across 1 directory with 24 updates ([#190](https://github.com/zeo-workspace/claude-agent-tui/issues/190)) ([63c5214](https://github.com/zeo-workspace/claude-agent-tui/commit/63c52145fb151f1ef311563c58bd26a2c865ead5))
+* **deps:** bump trufflesecurity/trufflehog from 3.99.8 to 3.99.9 ([#184](https://github.com/zeo-workspace/claude-agent-tui/issues/184)) ([126c2ad](https://github.com/zeo-workspace/claude-agent-tui/commit/126c2ada61f00af2b367259043cb35eefc82a491))
+
 ## [0.17.5](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.17.4...v0.17.5) (2026-11-25)
 
 
