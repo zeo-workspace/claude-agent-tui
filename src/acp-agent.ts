@@ -446,6 +446,11 @@ type Session = {
    */
   gate?: SessionGate;
   /**
+   * The current PTY's exit hook that tears the gate down. Kept so a re-spawn can drop it before it
+   * kills the old PTY: otherwise that exit would tear down the gate the new PTY still uses.
+   */
+  gateExitHook?: { dispose(): void };
+  /**
    * Story 044 (R2.2/R2.3) — the per-session Option-B sub-agent watcher: polls the story-041 SDK
    * sidechain readers while a `Task`/`Agent` spawn is OPEN on the main chain, feeding turn liveness
    * + the incremental nested render. Armed by the pump ONLY while such a spawn is open AND the
@@ -2286,8 +2291,10 @@ export class ClaudeAcpAgent {
     // (story 014) idempotently kills the PTY and stops the JSONL watcher; if no engine handle is
     // present (e.g. an injected fake), fall back to stopping the watcher directly. ===
     if (session.engine) {
-      session.engine.cleanup();
+      // kill() BEFORE cleanup(): kill() is inert once the engine is disposed (R3.4), so the old
+      // order left claude running after its session was torn down (found 2026-11-25).
       session.engine.kill();
+      session.engine.cleanup();
     } else {
       // `watcher` is now OPTIONAL (story 028, sub-task 2.1): a fresh session may be torn down before
       // its transcript appeared, so no watcher was ever armed — null-guard the no-engine fallback.
@@ -2787,8 +2794,7 @@ export class ClaudeAcpAgent {
       // there is no transcript to preserve. RESUME re-spawn: keep the R3.7 order (bring the new PTY up
       // BEFORE retiring the old, so a failed re-spawn leaves the prior PTY + currentValue intact).
       if (fresh) {
-        oldEngine?.cleanup();
-        oldEngine?.kill();
+        this.retireEngine(session, oldEngine);
       }
       // Re-spawn through the SAME startEngine seam createSession uses, reusing the sessionId so the
       // transcript is reattached on resume (R3.4) or freshly created on the pre-interaction path; the
@@ -2818,12 +2824,18 @@ export class ClaudeAcpAgent {
       });
       if (!fresh) {
         // New PTY is live — only now retire the old one (idle ⇒ no pending turn to double-resolve).
-        oldEngine?.cleanup();
-        oldEngine?.kill();
+        this.retireEngine(session, oldEngine);
       }
       session.pty = started.pty;
       session.engine = started.engine;
       session.watcher = started.watcher;
+      // The gate follows the new PTY: its allow/deny keystrokes and output reads go to the live claude,
+      // and the new PTY's exit is the one that tears the gate down.
+      const liveGate = session.gate;
+      if (liveGate && !liveGate.isTorndown) {
+        liveGate.bindPty(started.pty as unknown as GatePty);
+        session.gateExitHook = started.pty.onExit(() => void liveGate.teardown());
+      }
       session.addDirTrust?.dispose();
       session.addDirTrust = addDirTrust;
       if (change.permissionMode) {
@@ -2832,6 +2844,19 @@ export class ClaudeAcpAgent {
     } finally {
       session.respawning = false;
     }
+  }
+
+  /**
+   * Retire a re-spawned session's previous claude. The gate's exit hook on that PTY is dropped first,
+   * so its exit does not tear down the gate the new PTY uses; then the PTY is killed BEFORE cleanup(),
+   * because SessionEngine.kill() is inert once the engine is disposed (R3.4) — the old order, cleanup()
+   * then kill(), left the previous claude running until the adapter exited (found 2026-11-25).
+   */
+  private retireEngine(session: Session, engine: SessionEngine | undefined): void {
+    session.gateExitHook?.dispose();
+    session.gateExitHook = undefined;
+    engine?.kill();
+    engine?.cleanup();
   }
 
   /** Parity round 26 (item 238): a trust-dialog watcher for a PTY started with `--add-dir` folders. */
@@ -4154,6 +4179,7 @@ export class ClaudeAcpAgent {
     if (started.engine) {
       this.engines.set(startedSessionId, started.engine);
     }
+    let gateExitHook: { dispose(): void } | undefined;
 
     // === SEAM(034): bind the gate to the AUTHORITATIVE session id (engine-spawn-generated) and the
     // live PTY. The nudge forces a pump re-read on every hook arrival, shrinking the JSONL
@@ -4184,7 +4210,7 @@ export class ClaudeAcpAgent {
         () => this.sessions[startedSessionId]?.turnDetector?.noteActivity(),
       );
       boundGate.bindPty(started.pty as unknown as GatePty);
-      started.pty.onExit(() => void boundGate.teardown());
+      gateExitHook = started.pty.onExit(() => void boundGate.teardown());
     }
 
     // Story 046: advertise the full curated model catalog (was a single static "Default" entry),
@@ -4274,6 +4300,7 @@ export class ClaudeAcpAgent {
         inferContextWindowFromModel(DEFAULT_MODEL_INFO.value) ?? DEFAULT_CONTEXT_WINDOW,
       taskState,
       gate,
+      gateExitHook,
     };
 
     // Story 073 (R1) — the seed model is Opus (`default`), so probe fast-mode availability out of band

@@ -434,6 +434,9 @@ class SessionGateImpl implements SessionGate {
   }
 
   bindPty(pty: GatePty): void {
+    // A re-spawn binds the session's new PTY: drop the tap on the old one first.
+    this.outputTap?.dispose();
+    this.outputTap = undefined;
     this.pty = pty;
     if (typeof pty.onData === "function") {
       this.outputTap = pty.onData((data: string) => {
