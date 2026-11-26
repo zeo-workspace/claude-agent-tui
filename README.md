@@ -26,7 +26,7 @@ This project bridges the two: it drives the **official Claude Code TUI** over a 
 
 - The **`claude` CLI** (Claude Code subscription) available on your `PATH`.
 - **Node.js ≥ 24** — the runtime and test suite use native TypeScript type-stripping (`node --experimental-strip-types`). Raising this floor from the previous `>=20` is a **breaking change** for consumers still on Node 20–23.
-- **SDK lines** — the ACP TypeScript SDK 2.x (`@agentclientprotocol/sdk` 2.4.0, its `/unstable` entry; ACP protocol v1 on the wire) and `@anthropic-ai/claude-agent-sdk` 0.3.318. This fork drives the `claude` CLI installed on the host, not the one the SDK bundles.
+- **SDK lines** — the ACP TypeScript SDK 2.x (`@agentclientprotocol/sdk` 2.4.0, its `/unstable` entry; ACP protocol v1 on the wire) and `@anthropic-ai/claude-agent-sdk` 0.3.331. This fork drives the `claude` CLI installed on the host, not the one the SDK bundles.
 
 > **Why 24, and not upstream's `>=22`?** The floor is a support policy, not a measured minimum: this project targets the **active LTS** line, which is Node 24. It is verified rather than copied — a fresh clone with no host `node_modules` or `dist/`, then `npm ci` → `npm run build` → `npm test`, inside `node:24` pinned by digest `sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584` (Node v24.19.0). Green in both the fork and mirror trees: 1222 tests in the fork, 1183 here, 0 failures.
 >
@@ -74,15 +74,8 @@ npm test
 
 ## Release notes
 
-**0.16.3** — security and hygiene:
-
-- zod 4.6.7 (GHSA-mrhx).
-- Fast mode is detected on any model, not only Opus.
-- A tool call with a non-string path no longer breaks its title; Grep and Bash titles show the CLI's input aliases (`file_path`, `-l`, `-c`, `command_description`).
-- Deleting a never-prompted, unknown or non-UUID session succeeds.
-- `effort = "ultracode"` is accepted as deprecated and maps to effort `xhigh` plus the Ultracode switch.
-
-The full per-commit log is [`CHANGELOG.md`](CHANGELOG.md).
+Each release has its section in [`CHANGELOG.md`](CHANGELOG.md), newest first, and its
+[GitHub release](https://github.com/zeo-workspace/claude-agent-tui/releases), so the notes are not repeated here.
 
 ## Supply-chain notes
 
